@@ -47,7 +47,7 @@ Fill in values from Supabase → **Settings → API**:
 | `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key (**server only**) |
-| `NEXT_PUBLIC_APP_URL` | App origin, e.g. `http://localhost:3000` |
+| `NEXT_PUBLIC_APP_URL` | Public app origin used in portal links (e.g. `https://your-domain.com`). Required on Vercel — do not leave as `localhost` in production. |
 
 Optional:
 

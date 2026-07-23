@@ -27,7 +27,7 @@ function getPinConfig() {
  * Admin-safe portal payload: includes rebuildable URL and viewable PIN.
  * Never exposes hashes to the client UI.
  */
-export function toAdminPortalView(portal) {
+export function toAdminPortalView(portal, request) {
   if (!portal) return null;
   const {
     access_token_hash,
@@ -41,7 +41,7 @@ export function toAdminPortalView(portal) {
     has_pin: !!pin_hash,
     pin: pin || null,
     has_token: !!access_token,
-    url: access_token ? buildPortalUrl(access_token) : null,
+    url: access_token ? buildPortalUrl(access_token, request) : null,
   };
 }
 
@@ -56,7 +56,7 @@ export async function getPortalByBooking(bookingId) {
   return data;
 }
 
-export async function generatePortalLink(bookingId, actor) {
+export async function generatePortalLink(bookingId, actor, options = {}) {
   const supabase = createServiceClient();
   const token = generatePortalToken();
   const access_token_hash = hashToken(token);
@@ -148,7 +148,7 @@ export async function generatePortalLink(bookingId, actor) {
   return {
     portal,
     token,
-    url: buildPortalUrl(token),
+    url: buildPortalUrl(token, options.request),
   };
 }
 

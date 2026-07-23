@@ -3,7 +3,7 @@ import { validateBookingUpdate } from '@/lib/validation';
 import { getBooking, updateBooking, deleteBooking } from '@/services/bookingService';
 import { toAdminPortalView } from '@/services/portalService';
 
-export async function GET(_request, { params }) {
+export async function GET(request, { params }) {
   const auth = await requireAdmin();
   if (auth.error) return auth.error;
 
@@ -12,7 +12,7 @@ export async function GET(_request, { params }) {
     const data = await getBooking(id);
     return jsonOk({
       ...data,
-      portal: toAdminPortalView(data.portal),
+      portal: toAdminPortalView(data.portal, request),
     });
   } catch (err) {
     return jsonError(err.message, err.code === 'PGRST116' ? 404 : 500);

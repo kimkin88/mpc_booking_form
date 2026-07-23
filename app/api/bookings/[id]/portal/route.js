@@ -7,12 +7,12 @@ import {
   toAdminPortalView,
 } from '@/services/portalService';
 
-export async function GET(_request, { params }) {
+export async function GET(request, { params }) {
   const auth = await requireAdmin();
   if (auth.error) return auth.error;
   const { id } = await params;
   const portal = await getPortalByBooking(id);
-  return jsonOk(toAdminPortalView(portal));
+  return jsonOk(toAdminPortalView(portal, request));
 }
 
 export async function POST(request, { params }) {
@@ -25,9 +25,9 @@ export async function POST(request, { params }) {
     const action = body.action;
 
     if (action === 'generate' || action === 'regenerate') {
-      const result = await generatePortalLink(id, auth.actor);
+      const result = await generatePortalLink(id, auth.actor, { request });
       return jsonOk({
-        portal: toAdminPortalView(result.portal),
+        portal: toAdminPortalView(result.portal, request),
         url: result.url,
         token: result.token,
       });
@@ -35,12 +35,12 @@ export async function POST(request, { params }) {
 
     if (action === 'set_pin') {
       const portal = await setPortalPin(id, body.pin || null, auth.actor);
-      return jsonOk(toAdminPortalView(portal));
+      return jsonOk(toAdminPortalView(portal, request));
     }
 
     if (action === 'reset_pin') {
       const portal = await setPortalPin(id, null, auth.actor);
-      return jsonOk(toAdminPortalView(portal));
+      return jsonOk(toAdminPortalView(portal, request));
     }
 
     if (
@@ -64,7 +64,7 @@ export async function POST(request, { params }) {
       if (action === 'set_expiry') updates.expires_at = body.expires_at ?? null;
 
       const portal = await updatePortalStatus(id, updates, auth.actor);
-      return jsonOk(toAdminPortalView(portal));
+      return jsonOk(toAdminPortalView(portal, request));
     }
 
     if (action === 'set_status_editability') {
@@ -73,7 +73,7 @@ export async function POST(request, { params }) {
         { status_portal_editable: body.status_portal_editable || {} },
         auth.actor
       );
-      return jsonOk(toAdminPortalView(portal));
+      return jsonOk(toAdminPortalView(portal, request));
     }
 
     return jsonError('Unknown action', 400);

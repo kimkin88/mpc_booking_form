@@ -68,7 +68,7 @@ export async function GET(request) {
         regenerated_at: row.regenerated_at,
         failed_pin_attempts: row.failed_pin_attempts,
         pin_locked_until: row.pin_locked_until,
-        url: row.access_token ? buildPortalUrl(row.access_token) : null,
+        url: row.access_token ? buildPortalUrl(row.access_token, request) : null,
         sb_number: booking?.sb_number,
         campaign_name: booking?.campaign_name,
         client_company: booking?.client_company,
