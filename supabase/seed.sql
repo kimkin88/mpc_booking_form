@@ -1,0 +1,7 @@
+-- Seed notes
+--
+-- Admin users are created in Supabase Auth (Dashboard → Authentication → Users).
+-- The handle_new_user trigger creates a matching profiles row with role = 'admin'.
+--
+-- After creating a user:
+-- UPDATE profiles SET full_name = 'Admin User' WHERE email = 'admin@example.com';

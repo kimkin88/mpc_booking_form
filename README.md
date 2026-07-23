@@ -1,36 +1,178 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MPC Booking — Client-Editable Booking Form
 
-## Getting Started
+Secure booking management for the internal admin team, with a shareable client portal for permitted edits, multi-file uploads, activity history, and version revert.
 
-First, run the development server:
+## Tech stack
+
+- **Next.js** (App Router) + **JavaScript**
+- **Styled Components**
+- **Radix UI**
+- **Supabase** (Auth, Postgres, Storage, RLS)
+- **ESLint** + **Prettier**
+
+## Features
+
+- Full admin booking form (reference, client, JCD contact, schedule, sites, invoice, notes)
+- Field-level client permissions (hidden / read-only / editable / required)
+- Secure portal links with token-only client access, lock/disable/expiry controls
+- Multi-file uploads per category with drag-and-drop, replace, soft-delete, restore, versions
+- Immutable activity log with filters and before/after diffs
+- Optimistic concurrency via booking version numbers
+- Version history with full/section/field/file revert (creates a new version)
+- In-app notifications for portal and file events
+
+## Prerequisites
+
+1. Node.js 20+
+2. A [Supabase](https://supabase.com) project
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in values from Supabase → **Settings → API**:
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (**server only**) |
+| `NEXT_PUBLIC_APP_URL` | App origin, e.g. `http://localhost:3000` |
+
+Optional:
+
+- `MAX_FILE_SIZE_BYTES` (default `26214400` / 25MB)
+- `MALWARE_SCAN_ENABLED` (default off — see assumptions)
+
+### 3. Database & storage
+
+In the Supabase SQL editor, run:
+
+```text
+supabase/migrations/001_initial_schema.sql
+```
+
+Safe to re-run. Creates tables, RLS policies, the `booking-files` storage bucket, portal tokens, per-portal field permissions, and an auth trigger that creates an admin profile on signup.
+
+### 4. Admin login (Supabase Auth)
+
+Admin access uses **Supabase Auth** (not a local password file).
+
+1. In the [Supabase Dashboard](https://supabase.com/dashboard) → **Authentication** → **Users**, create a user (email + password).
+2. The `handle_new_user` trigger inserts a row into `profiles` with `role = 'admin'`.
+3. Open `/login` and sign in with that **email** and **password**.
+
+Optional: set the display name after creating the user:
+
+```sql
+UPDATE profiles SET full_name = 'Admin User' WHERE email = 'admin@example.com';
+```
+
+While logged in, use **Change password** in Settings to update the Supabase Auth password (minimum 6 characters).
+
+Required env vars (already used for data):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (server-only; portal + privileged writes)
+
+### 5. Run locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) (redirects to `/admin`).
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command | Description |
+|---|---|
+| `npm run dev` | Development server |
+| `npm run build` | Production build |
+| `npm run start` | Start production server |
+| `npm run lint` | ESLint |
+| `npm run format` | Prettier write |
 
-## Learn More
+## Project structure
 
-To learn more about Next.js, take a look at the following resources:
+```text
+app/                  # App Router pages & API routes
+components/           # UI, layout, booking, files, portal, activity
+features/             # Feature hooks
+hooks/                # Shared React hooks
+lib/                  # Supabase clients, constants, permissions, validation, crypto
+services/             # Business logic (booking, portal, files, activity, versions, revert)
+styles/               # Theme, global styles, styled-components registry
+contexts/             # Auth provider
+utils/                # Formatters & helpers
+supabase/migrations/  # SQL schema + RLS
+public/               # Static assets
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Admin workflow
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Create a booking (`SB Number` + currency required; **MPC Chooses Sites** defaults to on)
+2. Fill sections and save
+3. Configure client field permissions
+4. Generate portal link → copy / preview → send the unique link to the client
+5. Client updates permitted fields and uploads files
+6. Client submits → status becomes **Ready for Review** (portal stays open)
+7. Review activity, compare versions, revert if needed
+8. Lock or disable the portal when complete
 
-## Deploy on Vercel
+## Client portal
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- URL: `/portal/[token]`
+- Scoped to one booking; token is unguessable and hashed at rest
+- No client login is required; the unique link is the only credential
+- Save Progress and Submit **do not** lock, expire, or invalidate the link
+- Internal notes, admin controls, and full activity log are never exposed
+- Client file removal is a soft-delete (admin can restore)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Security notes
+
+- Service role key is used only in server routes — never shipped to the browser
+- Portal access is validated in API routes using the hashed unique token; clients have no direct table JWT
+- File downloads use signed, time-limited Storage URLs
+- File uploads use signed Storage upload URLs (browser → Supabase), so large files work on Vercel
+- Portal tokens are SHA-256 hashed before storage
+- Server re-validates field permissions on every client write
+
+## Assumptions (open decisions from the requirements)
+
+1. **Default client-editable fields:** campaign details, client contacts, schedule, sites, invoice/PO, files, client notes. JCD contact & budget default to read-only. Internal notes / portal / status stay hidden.
+2. **Client file deletion:** soft-delete only; clients may remove their own uploads.
+3. **Max file size:** 25MB. Allowed types: common images, PDF, Office docs, CSV, TXT, ZIP/RAR/7Z. Uploads go **direct to Supabase Storage** (signed URLs) so they work on Vercel despite the 4.5MB serverless body limit.
+4. **Booking status → portal editability:** configurable per portal (defaults: editable through review/changes; read-only after approval/completion).
+5. **Automated portal lock/expiry:** not enabled by default (optional expiry exists for admins).
+6. **Client access:** token-only via the unique link.
+7. **File version history:** admin-only.
+8. **Comments:** booking-level client notes only (no per-field comments).
+9. **Submit:** does **not** auto-lock editing.
+10. **Audit retention:** indefinite (no auto-purge).
+11. **Client identity:** single portal identity per booking via the unique link, not multi-user client accounts.
+12. **Notifications:** persisted in-app; email provider can be wired later without schema changes.
+13. **Malware scanning:** stubbed behind `MALWARE_SCAN_ENABLED` — wire a real engine before production.
+
+## Acceptance criteria coverage
+
+| Area | Covered |
+|---|---|
+| Portal generate / copy / regenerate / lock / unlock / disable | Yes |
+| Portal stays open after save & submit; no default expiry | Yes |
+| MPC Chooses Sites default `true` + logged changes | Yes |
+| Multi-file per category, add more, restore, versions | Yes |
+| Activity log + actor/source + before/after | Yes |
+| Revert field/section/file/full version (new version) | Yes |
+| Internal notes never in portal; server-side permission checks | Yes |

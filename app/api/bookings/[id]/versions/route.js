@@ -1,0 +1,59 @@
+import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { getVersion, listVersions } from '@/services/versionService';
+import { previewRevert, revertBooking } from '@/services/revertService';
+
+export async function GET(request, { params }) {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.error;
+
+  try {
+    const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const versionNumber = searchParams.get('version');
+
+    if (versionNumber) {
+      const version = await getVersion(id, Number(versionNumber));
+      return jsonOk(version);
+    }
+
+    const versions = await listVersions(id);
+    return jsonOk(versions);
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
+}
+
+export async function POST(request, { params }) {
+  const auth = await requireAdmin();
+  if (auth.error) return auth.error;
+
+  try {
+    const { id } = await params;
+    const body = await request.json();
+
+    if (body.action === 'preview') {
+      const preview = await previewRevert(id, body.targetVersion, body.mode || 'full', {
+        section: body.section,
+        fieldName: body.fieldName,
+      });
+      return jsonOk(preview);
+    }
+
+    if (body.action === 'revert') {
+      const result = await revertBooking({
+        bookingId: id,
+        targetVersionNumber: body.targetVersion,
+        mode: body.mode || 'full',
+        section: body.section,
+        fieldName: body.fieldName,
+        fileId: body.fileId,
+        actor: auth.actor,
+      });
+      return jsonOk(result);
+    }
+
+    return jsonError('Unknown action', 400);
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
+}
