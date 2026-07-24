@@ -64,13 +64,18 @@ const AddRow = styled.div`
   margin-top: ${({ theme }) => theme.space[2]};
 `;
 
-const emptyDraft = (rates) => ({
+const emptyDraft = () => ({
   day_length: '1',
   city: 'London',
   shoot_date: '',
-  // default to full day when affordable, else half
-  ...(rates ? {} : {}),
 });
+
+/** Prefer full day when it fits; otherwise first affordable option. */
+function defaultDraftDayLength(options) {
+  if (!options?.length) return '1';
+  if (options.some((o) => o.value === '1')) return '1';
+  return options[0].value;
+}
 
 function money(n, currency = 'GBP') {
   return formatCurrencyWhole(n, currency);
@@ -82,7 +87,7 @@ function rowKey(row) {
 
 /**
  * Section 3 — Shoot requirements
- * Always shows one row (draft when empty). Plus adds more when budget allows.
+ * Saved rows as cards; + opens a draft card to add another when budget allows.
  */
 export function ShootRequirementsSection({
   booking,
@@ -98,6 +103,7 @@ export function ShootRequirementsSection({
   const currency = booking?.currency || 'GBP';
 
   const [draft, setDraft] = useState(() => emptyDraft());
+  const [draftOpen, setDraftOpen] = useState(false);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const [saving, setSaving] = useState(false);
@@ -106,8 +112,7 @@ export function ShootRequirementsSection({
   const remaining = remainingBudget(budget, entries, rates);
   const budgetSet = hasBudgetCap(budget);
   const canAddMore = !readOnly && canAddShootRow(budget, entries, rates);
-  // Always show draft row when empty; when entries exist, show + only if budget allows
-  const showDraftRow = !readOnly && (entries.length === 0 || canAddMore);
+  const showDraftRow = draftOpen && canAddMore;
 
   const draftOptions = useMemo(() => {
     const base = budgetSet
@@ -122,6 +127,10 @@ export function ShootRequirementsSection({
     }));
   }, [budget, budgetSet, currency, entries, rates]);
 
+  const draftDayLength = draftOptions.some((o) => o.value === draft.day_length)
+    ? draft.day_length
+    : defaultDraftDayLength(draftOptions);
+
   const cityOptions = MARKET_CITIES.map((c) => ({ value: c, label: c }));
 
   const checkDuplicate = (candidate, excludeId = null) => {
@@ -132,7 +141,8 @@ export function ShootRequirementsSection({
   const handleAdd = async () => {
     setError('');
     setWarning('');
-    if (!draft.day_length) {
+    const dayLength = draftDayLength;
+    if (!dayLength) {
       setError('Shoot Day Length is required');
       return;
     }
@@ -146,33 +156,51 @@ export function ShootRequirementsSection({
     }
     if (budgetSet) {
       const affordable = affordableDayLengths(budget, entries, rates);
-      if (!affordable.some((o) => o.value === String(draft.day_length))) {
+      if (!affordable.some((o) => Number(o.value) === Number(dayLength))) {
         setError('This day length would exceed the remaining budget');
         return;
       }
     }
-    if (checkDuplicate(draft)) {
+    if (checkDuplicate({ ...draft, day_length: dayLength })) {
       setWarning('A shoot row with the same length, city, and date already exists.');
     }
 
-    const appliedRate = costForDayLength(draft.day_length, rates);
+    const appliedRate = costForDayLength(dayLength, rates);
     setSaving(true);
     try {
       await onAdd({
         shoot_date: draft.shoot_date,
-        day_length: Number(draft.day_length),
+        day_length: Number(dayLength),
         city: draft.city,
         format: 'Shoot',
         applied_rate: appliedRate,
         applied_currency: currency,
       });
       setDraft(emptyDraft());
+      setDraftOpen(false);
       setWarning('');
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
     }
+  };
+
+  const openDraft = () => {
+    if (!canAddMore) return;
+    setError('');
+    setWarning('');
+    const options = budgetSet
+      ? affordableDayLengths(budget, entries, rates)
+      : [
+          { value: '0.5', label: '0.5 day' },
+          { value: '1', label: '1 day' },
+        ];
+    setDraft({
+      ...emptyDraft(),
+      day_length: defaultDraftDayLength(options),
+    });
+    setDraftOpen(true);
   };
 
   const handleLengthChange = async (entry, nextLength) => {
@@ -264,8 +292,8 @@ export function ShootRequirementsSection({
     <Section id={id}>
       <SectionTitle>Shoot requirements</SectionTitle>
       <SectionHint>
-        Starts with one shoot row. {rates.label}: {money(rates.fullDay, currency)} = 1 day ·{' '}
-        {money(rates.halfDay, currency)} = 0.5 day. Use + to add another row when remaining budget
+        {rates.label}: {money(rates.fullDay, currency)} = 1 day ·{' '}
+        {money(rates.halfDay, currency)} = 0.5 day. Use + to add a shoot row when remaining budget
         allows.
       </SectionHint>
 
@@ -361,11 +389,7 @@ export function ShootRequirementsSection({
             <Select
               label="Shoot Day Length"
               required
-              value={
-                draftOptions.some((o) => o.value === draft.day_length)
-                  ? draft.day_length
-                  : draftOptions[0]?.value || ''
-              }
+              value={draftDayLength || ''}
               onValueChange={(v) => setDraft((d) => ({ ...d, day_length: v }))}
               options={draftOptions}
               disabled={!draftOptions.length || saving}
@@ -389,8 +413,7 @@ export function ShootRequirementsSection({
           </Grid>
           <Row style={{ marginTop: '0.75rem', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.875rem', opacity: 0.85 }}>
-              Calculated cost:{' '}
-              {money(costForDayLength(draft.day_length || draftOptions[0]?.value, rates), currency)}
+              Calculated cost: {money(costForDayLength(draftDayLength, rates), currency)}
             </span>
             <AddRow style={{ marginTop: 0 }}>
               <Button
@@ -398,20 +421,29 @@ export function ShootRequirementsSection({
                 variant="secondary"
                 onClick={handleAdd}
                 disabled={saving || !draftOptions.length}
-                aria-label={entries.length === 0 ? 'Save shoot row' : 'Add shoot day'}
-                title={
-                  entries.length === 0
-                    ? 'Save this shoot row'
-                    : canAddMore
-                      ? 'Add another shoot row'
-                      : 'Budget exhausted'
-                }
+                aria-label="Add shoot day"
+                title="Add shoot row"
               >
-                {entries.length === 0 ? 'Save row' : '+'}
+                +
               </Button>
             </AddRow>
           </Row>
         </RowCard>
+      )}
+
+      {canAddMore && !draftOpen && (
+        <AddRow>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={openDraft}
+            disabled={saving || !draftOptions.length}
+            aria-label="Add shoot day"
+            title={budgetSet && !draftOptions.length ? 'Budget exhausted' : 'Add shoot row'}
+          >
+            +
+          </Button>
+        </AddRow>
       )}
 
       {!canAddMore && !readOnly && budgetSet && entries.length > 0 && (
