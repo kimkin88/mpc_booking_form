@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/apiClient';
+import { useVisibilityInterval } from '@/hooks/useVisibilityInterval';
 
 const CLIENT_RECENT_ACTIONS = new Set([
   'field_updated',
@@ -39,7 +40,7 @@ function filterForRole(entries, role) {
 /**
  * Polls booking activity for Recent updates.
  * `role`: client | admin | all
- * `onClientActivity` runs when new client activity appears (for live booking sync).
+ * `onClientActivity` runs when new client activity appears (optional).
  */
 export function useRecentClientUpdates(
   bookingId,
@@ -64,8 +65,6 @@ export function useRecentClientUpdates(
     if (!bookingId || inFlight.current) return;
     inFlight.current = true;
     try {
-      // Always load a mixed window so we can sync on client activity
-      // regardless of the selected filter.
       const entries = await api.get(`/api/bookings/${bookingId}/activity?role=all&limit=80`);
       const list = Array.isArray(entries) ? entries : [];
       const display = filterForRole(list, roleRef.current);
@@ -87,29 +86,10 @@ export function useRecentClientUpdates(
     }
   }, [bookingId]);
 
-  useEffect(() => {
-    if (!enabled || !bookingId) return undefined;
-
-    let cancelled = false;
-    const run = () => {
-      if (!cancelled && document.visibilityState !== 'hidden') {
-        refresh();
-      }
-    };
-
-    run();
-    const timer = setInterval(run, intervalMs);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') run();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [bookingId, enabled, intervalMs, refresh]);
+  useVisibilityInterval(refresh, {
+    enabled: Boolean(enabled && bookingId),
+    intervalMs,
+  });
 
   // Re-filter immediately when the admin switches tabs (without waiting for poll).
   useEffect(() => {

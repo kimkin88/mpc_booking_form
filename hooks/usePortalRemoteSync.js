@@ -5,10 +5,8 @@ import { portalRequest } from '@/lib/apiClient';
 import {
   bookingSyncFingerprint,
   diffBookingSyncFingerprint,
-  filesFingerprint,
 } from '@/lib/syncFingerprints';
-
-export { filesFingerprint } from '@/lib/syncFingerprints';
+import { useVisibilityInterval } from '@/hooks/useVisibilityInterval';
 
 /**
  * Polls the portal payload and applies remote updates when booking data changes.
@@ -50,7 +48,6 @@ export function usePortalRemoteSync({
 
   const check = useCallback(async () => {
     if (!token || inFlight.current) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
     const known = fingerprintRef.current;
     if (known == null) return;
@@ -95,27 +92,10 @@ export function usePortalRemoteSync({
     }
   }, [token]);
 
-  useEffect(() => {
-    if (!enabled || !token) return undefined;
-
-    let cancelled = false;
-    const run = () => {
-      if (!cancelled) check();
-    };
-
-    run();
-    const timer = setInterval(run, intervalMs);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') run();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [token, enabled, intervalMs, check]);
+  useVisibilityInterval(check, {
+    enabled: Boolean(enabled && token),
+    intervalMs,
+  });
 }
 
 export default usePortalRemoteSync;

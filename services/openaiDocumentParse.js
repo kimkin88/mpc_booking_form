@@ -3,6 +3,8 @@
  * Maps OOH media plans / MPC briefs onto the MPC booking form fields.
  */
 
+import { MAX_SHOOT_BUDGET } from '@/lib/constants';
+
 const FIELD_KEYS = [
   'brand',
   'client_company',
@@ -16,9 +18,6 @@ const FIELD_KEYS = [
   'client_notes',
   'internal_notes',
 ];
-
-/** Photography shoot budget ceiling — media buys are much larger. */
-const MAX_SHOOT_BUDGET = 20000;
 
 function hasOpenAi() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
@@ -343,4 +342,4 @@ export function mergeHeuristicAndAi(heuristic, aiNormalized) {
   };
 }
 
-export { hasOpenAi, MAX_SHOOT_BUDGET };
+export { hasOpenAi };

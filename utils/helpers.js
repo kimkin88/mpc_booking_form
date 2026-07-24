@@ -32,36 +32,6 @@ export function diffObjects(previous, next, fields) {
   return changes;
 }
 
-export function pick(obj, keys) {
-  const result = {};
-  keys.forEach((key) => {
-    if (obj && Object.prototype.hasOwnProperty.call(obj, key)) {
-      result[key] = obj[key];
-    }
-  });
-  return result;
-}
-
-export function omit(obj, keys) {
-  const result = { ...obj };
-  keys.forEach((key) => delete result[key]);
-  return result;
-}
-
-export function debounce(fn, wait = 300) {
-  let timer;
-  const debounced = (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), wait);
-  };
-  debounced.cancel = () => clearTimeout(timer);
-  return debounced;
-}
-
-export function cn(...parts) {
-  return parts.filter(Boolean).join(' ');
-}
-
 /**
  * Human-readable client label for activity logs and actor attribution.
  */
@@ -84,4 +54,3 @@ export function clientActorFromBooking(booking = {}) {
     role: 'client',
   };
 }
-

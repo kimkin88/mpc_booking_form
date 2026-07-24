@@ -15,7 +15,7 @@ import {
 } from '@/lib/rateCard';
 import { calculateDeliveryDate, effectiveDeliveryDate } from '@/lib/deliveryDate';
 import { calculateInCharge, calculatePortalLockDate } from '@/lib/inCharge';
-import { formatDate } from '@/utils/format';
+import { formatDate, formatCurrencyWhole } from '@/utils/format';
 
 const EmailChip = styled.span`
   display: inline-flex;
@@ -97,18 +97,7 @@ function anyShown(fieldHidden, keys) {
 }
 
 function money(n, currency = 'GBP') {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return '—';
-  try {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: currency || 'GBP',
-      maximumFractionDigits: 0,
-      useGrouping: false,
-    }).format(num);
-  } catch {
-    return String(num);
-  }
+  return formatCurrencyWhole(n, currency);
 }
 
 function CcEmailsField({
@@ -529,8 +518,6 @@ export function DeliverablesSection({
   id,
 }) {
   const keys = ['format_type', 'campaign_start', 'campaign_end', 'client_notes', 'files'];
-  if (!anyShown(fieldHidden, keys) && !filesSlot) return null;
-
   const formatType = values.format_type || '';
   const isKnownFormat = FORMAT_TYPES.some((f) => f.value === formatType);
   const isOther = formatType === 'Other' || (formatType && !isKnownFormat);
@@ -548,6 +535,8 @@ export function DeliverablesSection({
     () => calculatePortalLockDate(values.campaign_start),
     [values.campaign_start]
   );
+
+  if (!anyShown(fieldHidden, keys) && !filesSlot) return null;
 
   const formatRequired = fieldRequired.format_type !== false;
   const startRequired = fieldRequired.campaign_start !== false;
@@ -725,26 +714,4 @@ export function InternalNotesSection({ values, onChange, readOnly = false }) {
       />
     </Section>
   );
-}
-
-/* —— Back-compat aliases —— */
-export function ReferenceBudgetSection(props) {
-  return <CampaignDetailsSection {...props} />;
-}
-export function ClientCampaignSection(props) {
-  return <CampaignDetailsSection {...props} />;
-}
-export function JcdContactSection(props) {
-  return <ContactInformationSection {...props} />;
-}
-export function ClientNotesSection(props) {
-  return <DeliverablesSection {...props} />;
-}
-export function InvoiceSection() {
-  return null;
-}
-export function NotesSection({ values, onChange, showInternal = true, readOnly = false }) {
-  return showInternal ? (
-    <InternalNotesSection values={values} onChange={onChange} readOnly={readOnly} />
-  ) : null;
 }

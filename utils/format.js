@@ -34,6 +34,22 @@ export function formatCurrency(amount, currency = 'GBP', locale = 'en-GB') {
   }).format(num);
 }
 
+/** Whole-currency display used by shoot budget UI (no fractional digits). */
+export function formatCurrencyWhole(amount, currency = 'GBP', locale = 'en-GB') {
+  const num = Number(amount);
+  if (!Number.isFinite(num)) return '—';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: currency || 'GBP',
+      maximumFractionDigits: 0,
+      useGrouping: false,
+    }).format(num);
+  } catch {
+    return String(num);
+  }
+}
+
 export function formatFileSize(bytes) {
   if (!bytes && bytes !== 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB'];

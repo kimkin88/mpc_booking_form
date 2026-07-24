@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/apiClient';
+import { MAX_SHOOT_BUDGET } from '@/lib/constants';
 import { formatCurrency } from '@/utils/format';
 
 const FIELD_META = [
@@ -23,8 +24,6 @@ const FIELD_META = [
   { key: 'internal_notes', label: 'Internal notes' },
 ];
 
-/** Prefer these form fields when present (checked by default if empty). */
-const MAX_SHOOT_BUDGET = 20000;
 const Drop = styled.label`
   display: flex;
   flex-direction: column;

@@ -6,6 +6,7 @@ import {
   bookingSyncFingerprint,
   diffBookingSyncFingerprint,
 } from '@/lib/syncFingerprints';
+import { useVisibilityInterval } from '@/hooks/useVisibilityInterval';
 
 /**
  * Polls the full booking payload so admin sees portal (and other-tab) changes live.
@@ -38,7 +39,6 @@ export function useBookingRemoteSync(
   }, [saving]);
 
   useEffect(() => {
-    // Keep poll baseline aligned after local load/save, without forcing toasts.
     if (localFingerprint != null) {
       fingerprintRef.current = localFingerprint;
     }
@@ -48,9 +48,12 @@ export function useBookingRemoteSync(
     onRemoteUpdateRef.current = onRemoteUpdate;
   }, [onRemoteUpdate]);
 
+  useEffect(() => {
+    primed.current = false;
+  }, [bookingId]);
+
   const check = useCallback(async () => {
     if (!bookingId || inFlight.current) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
     inFlight.current = true;
     try {
@@ -75,7 +78,6 @@ export function useBookingRemoteSync(
       if (remote === known) return;
 
       const diff = diffBookingSyncFingerprint(known, remote);
-      // Ignore non-meaningful fingerprint noise (unstable timestamps, etc.)
       if (!diff.meaningful) {
         fingerprintRef.current = remote;
         return;
@@ -101,31 +103,10 @@ export function useBookingRemoteSync(
     }
   }, [bookingId]);
 
-  useEffect(() => {
-    primed.current = false;
-  }, [bookingId]);
-
-  useEffect(() => {
-    if (!enabled || !bookingId) return undefined;
-
-    let cancelled = false;
-    const run = () => {
-      if (!cancelled) check();
-    };
-
-    run();
-    const timer = setInterval(run, intervalMs);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') run();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [bookingId, enabled, intervalMs, check]);
+  useVisibilityInterval(check, {
+    enabled: Boolean(enabled && bookingId),
+    intervalMs,
+  });
 
   return { refresh: check };
 }

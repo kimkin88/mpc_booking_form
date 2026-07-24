@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /**
  * Tracks dirty form state and warns before unload.
@@ -17,46 +17,7 @@ export function useUnsavedChanges(isDirty) {
   }, [isDirty]);
 }
 
-/**
- * Generic async fetch helper hook.
- */
-export function useAsync(asyncFn, immediate = false) {
-  const [state, setState] = useState({
-    data: null,
-    error: null,
-    loading: immediate,
-  });
-  const mounted = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  const execute = useCallback(
-    async (...args) => {
-      setState((s) => ({ ...s, loading: true, error: null }));
-      try {
-        const data = await asyncFn(...args);
-        if (mounted.current) setState({ data, error: null, loading: false });
-        return data;
-      } catch (error) {
-        if (mounted.current) setState({ data: null, error, loading: false });
-        throw error;
-      }
-    },
-    [asyncFn]
-  );
-
-  useEffect(() => {
-    if (immediate) execute();
-  }, [immediate, execute]);
-
-  return { ...state, execute };
-}
-
+/** Debounces a value; used by search inputs (admin list, activity log, links). */
 export function useDebouncedValue(value, delay = 300) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -65,3 +26,5 @@ export function useDebouncedValue(value, delay = 300) {
   }, [value, delay]);
   return debounced;
 }
+
+export default useUnsavedChanges;

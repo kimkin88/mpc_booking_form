@@ -2,7 +2,6 @@
 
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import styled from 'styled-components';
 
 export const Tabs = styled(TabsPrimitive.Root)``;
@@ -91,40 +90,6 @@ export function Tooltip({ content, children }) {
     </TooltipPrimitive.Provider>
   );
 }
-
-export const Accordion = styled(AccordionPrimitive.Root)``;
-
-export const AccordionItem = styled(AccordionPrimitive.Item)`
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.radii.md};
-  margin-bottom: ${({ theme }) => theme.space[3]};
-  background: ${({ theme }) => theme.colors.surface};
-  overflow: hidden;
-`;
-
-export const AccordionTrigger = styled(AccordionPrimitive.Trigger)`
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: ${({ theme }) => theme.space[4]};
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-family: ${({ theme }) => theme.fonts.display};
-  font-size: ${({ theme }) => theme.fontSizes.lg};
-  font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  text-align: left;
-
-  &[data-state='open'] > span {
-    transform: rotate(180deg);
-  }
-`;
-
-export const AccordionContent = styled(AccordionPrimitive.Content)`
-  padding: 0 ${({ theme }) => theme.space[4]} ${({ theme }) => theme.space[4]};
-  overflow: hidden;
-`;
 
 export const Badge = styled.span`
   display: inline-flex;

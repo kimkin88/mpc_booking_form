@@ -18,7 +18,7 @@ import {
   remainingBudget,
   shootRowsCost,
 } from '@/lib/rateCard';
-import { formatDate, toDateInputValue } from '@/utils/format';
+import { formatDate, formatCurrencyWhole, toDateInputValue } from '@/utils/format';
 
 const RowCard = styled.div`
   border: 1px solid
@@ -73,18 +73,7 @@ const emptyDraft = (rates) => ({
 });
 
 function money(n, currency = 'GBP') {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return '—';
-  try {
-    return new Intl.NumberFormat('en-GB', {
-      style: 'currency',
-      currency: currency || 'GBP',
-      maximumFractionDigits: 0,
-      useGrouping: false,
-    }).format(num);
-  } catch {
-    return String(num);
-  }
+  return formatCurrencyWhole(n, currency);
 }
 
 function rowKey(row) {

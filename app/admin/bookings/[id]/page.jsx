@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import styled from 'styled-components';
@@ -21,11 +22,9 @@ import {
 } from '@/components/booking/FormSections';
 import { ShootRequirementsSection } from '@/components/booking/ShootRequirements';
 import { CalendarSection, SitesSection } from '@/components/booking/ScheduleSites';
-import { DocumentImportDialog } from '@/components/booking/DocumentImport';
 import { FilesSection } from '@/components/files/FilesSection';
 import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalControls, PermissionsPanel } from '@/components/booking/PortalPermissions';
-import { ActivityLogPanel, VersionsPanel } from '@/components/activity/ActivityVersions';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { api } from '@/lib/apiClient';
 import {
@@ -39,6 +38,22 @@ import { useBookingRemoteSync } from '@/hooks/useBookingRemoteSync';
 import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 import { formatDateTime } from '@/utils/format';
+
+const DocumentImportDialog = dynamic(
+  () =>
+    import('@/components/booking/DocumentImport').then((m) => m.DocumentImportDialog),
+  { ssr: false }
+);
+
+const ActivityLogPanel = dynamic(
+  () => import('@/components/activity/ActivityVersions').then((m) => m.ActivityLogPanel),
+  { ssr: false }
+);
+
+const VersionsPanel = dynamic(
+  () => import('@/components/activity/ActivityVersions').then((m) => m.VersionsPanel),
+  { ssr: false }
+);
 
 const UnsavedHint = styled.span`
   font-size: 0.875rem;
@@ -564,22 +579,6 @@ export default function BookingDetailPage() {
     [toast]
   );
 
-  const onClientActivity = useCallback(async () => {
-    try {
-      const result = await api.get(`/api/bookings/${id}`);
-      const prevVersion = Number(dataRef.current?.booking?.current_version || 0);
-      const nextVersion = Number(result?.booking?.current_version || 0);
-      // Activity sidebar refresh may fire without a booking change — don't toast then
-      applyRemoteBooking(result, {
-        allowToast: nextVersion > prevVersion,
-        versionChanged: nextVersion > prevVersion,
-        meaningful: nextVersion > prevVersion,
-      });
-    } catch {
-      // Keep last good snapshot
-    }
-  }, [id, applyRemoteBooking]);
-
   const {
     items: recentUpdates,
     refresh: refreshRecentUpdates,
@@ -587,7 +586,6 @@ export default function BookingDetailPage() {
     intervalMs: 4000,
     enabled: !loading,
     role: updatesRole,
-    onClientActivity,
   });
 
   const localFingerprint = useMemo(
@@ -1104,35 +1102,37 @@ export default function BookingDetailPage() {
           )}
         </Modal>
 
-        <DocumentImportDialog
-          open={importOpen}
-          onOpenChange={setImportOpen}
-          mode="full"
-          bookingId={id}
-          currentValues={form}
-          existingSchedule={data.schedule}
-          onApplyFields={(patch) => {
-            setForm((f) => ({ ...f, ...patch }));
-            setDirty(true);
-            setErrors((e) => {
-              const next = { ...e };
-              for (const key of Object.keys(patch)) delete next[key];
-              return next;
-            });
-          }}
-          onApplied={async ({ patch = {}, sitesAdded = 0, scheduleAdded = 0 } = {}) => {
-            if (sitesAdded || scheduleAdded) {
-              const result = await api.get(`/api/bookings/${id}`);
-              setData(result);
-              // Imported scalar fields win over server snapshot
-              setForm((f) => ({ ...result.booking, ...f, ...patch }));
-              if (Object.keys(patch).length) setDirty(true);
-              refreshRecentUpdates();
-            }
-            if (scheduleAdded) setTab('calendar');
-            else if (Object.keys(patch).length) setTab('details');
-          }}
-        />
+        {importOpen ? (
+          <DocumentImportDialog
+            open={importOpen}
+            onOpenChange={setImportOpen}
+            mode="full"
+            bookingId={id}
+            currentValues={form}
+            existingSchedule={data.schedule}
+            onApplyFields={(patch) => {
+              setForm((f) => ({ ...f, ...patch }));
+              setDirty(true);
+              setErrors((e) => {
+                const next = { ...e };
+                for (const key of Object.keys(patch)) delete next[key];
+                return next;
+              });
+            }}
+            onApplied={async ({ patch = {}, sitesAdded = 0, scheduleAdded = 0 } = {}) => {
+              if (sitesAdded || scheduleAdded) {
+                const result = await api.get(`/api/bookings/${id}`);
+                setData(result);
+                // Imported scalar fields win over server snapshot
+                setForm((f) => ({ ...result.booking, ...f, ...patch }));
+                if (Object.keys(patch).length) setDirty(true);
+                refreshRecentUpdates();
+              }
+              if (scheduleAdded) setTab('calendar');
+              else if (Object.keys(patch).length) setTab('details');
+            }}
+          />
+        ) : null}
       </BookingLayout>
     </AdminShell>
   );
