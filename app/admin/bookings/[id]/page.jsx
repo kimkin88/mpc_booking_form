@@ -23,6 +23,7 @@ import { ShootRequirementsSection } from '@/components/booking/ShootRequirements
 import { CalendarSection, SitesSection } from '@/components/booking/ScheduleSites';
 import { DocumentImportDialog } from '@/components/booking/DocumentImport';
 import { FilesSection } from '@/components/files/FilesSection';
+import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalControls, PermissionsPanel } from '@/components/booking/PortalPermissions';
 import { ActivityLogPanel, VersionsPanel } from '@/components/activity/ActivityVersions';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
@@ -30,8 +31,6 @@ import { api } from '@/lib/apiClient';
 import {
   BOOKING_STATUSES,
   DELIVERABLE_FILE_CATEGORIES,
-  MAX_FILE_SIZE_MB,
-  PO_FILE_CATEGORIES,
 } from '@/lib/constants';
 import { permissionsArrayToMap } from '@/lib/permissions';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
@@ -91,6 +90,34 @@ const RemoteBanner = styled.div`
     font-weight: ${({ theme }) => theme.fontWeights.semibold};
   }
 `;
+
+function ImportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="1.05rem" height="1.05rem">
+      <path
+        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 2v6h6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 18v-6M9 15l3 3 3-3"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function LinkIcon() {
   return (
@@ -469,6 +496,7 @@ export default function BookingDetailPage() {
 
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const dataRef = useRef(null);
 
   useUnsavedChanges(dirty);
 
@@ -479,6 +507,10 @@ export default function BookingDetailPage() {
   useEffect(() => {
     savingRef.current = saving;
   }, [saving]);
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   const load = useCallback(async () => {
     const result = await api.get(`/api/bookings/${id}`);
@@ -491,14 +523,26 @@ export default function BookingDetailPage() {
 
   const applyRemoteBooking = useCallback(
     (result, meta = {}) => {
+      const prevVersion = Number(dataRef.current?.booking?.current_version || 0);
+      const nextVersion = Number(result?.booking?.current_version || 0);
+      const versionChanged =
+        meta.versionChanged != null ? !!meta.versionChanged : nextVersion > prevVersion;
+      const meaningful =
+        meta.meaningful != null
+          ? !!meta.meaningful
+          : versionChanged ||
+            !!meta.filesChanged ||
+            !!meta.scheduleChanged ||
+            !!meta.sitesChanged ||
+            !!meta.permissionsChanged ||
+            !!meta.portalChanged;
+
       setData(result);
       setForm((prev) => {
         if (!prev) return { ...result.booking };
         if (dirtyRef.current) {
           // Keep local field edits; sync status + version awareness only
-          setRemoteAhead(
-            Number(result.booking?.current_version) > Number(prev.current_version || 0)
-          );
+          setRemoteAhead(nextVersion > Number(prev.current_version || 0));
           return {
             ...prev,
             status: result.booking.status,
@@ -509,8 +553,12 @@ export default function BookingDetailPage() {
         setRemoteAhead(false);
         return { ...result.booking };
       });
-      if (meta.allowToast) {
-        toast(dirtyRef.current ? 'Portal updated — load latest before saving' : 'Booking updated');
+
+      // Only toast when something meaningful actually changed (not poll noise)
+      if (meta.allowToast && meaningful) {
+        toast(
+          dirtyRef.current ? 'Portal updated — load latest before saving' : 'Booking updated'
+        );
       }
     },
     [toast]
@@ -519,7 +567,14 @@ export default function BookingDetailPage() {
   const onClientActivity = useCallback(async () => {
     try {
       const result = await api.get(`/api/bookings/${id}`);
-      applyRemoteBooking(result, { allowToast: true });
+      const prevVersion = Number(dataRef.current?.booking?.current_version || 0);
+      const nextVersion = Number(result?.booking?.current_version || 0);
+      // Activity sidebar refresh may fire without a booking change — don't toast then
+      applyRemoteBooking(result, {
+        allowToast: nextVersion > prevVersion,
+        versionChanged: nextVersion > prevVersion,
+        meaningful: nextVersion > prevVersion,
+      });
     } catch {
       // Keep last good snapshot
     }
@@ -761,8 +816,9 @@ export default function BookingDetailPage() {
                   eyebrow={form.sb_number}
                   title={form.campaign_name || form.client_company || 'Untitled booking'}
                   actions={
-                    <Button variant="secondary" onClick={() => setImportOpen(true)}>
-                      Import from document
+                    <Button variant="accent" onClick={() => setImportOpen(true)}>
+                      <ImportIcon />
+                      Import
                     </Button>
                   }
                 />
@@ -814,16 +870,11 @@ export default function BookingDetailPage() {
                     showAdminOwnership
                     scheduleEntries={data.schedule}
                     poFiles={
-                      <FilesSection
+                      <PoDocumentUploader
                         bookingId={id}
                         files={data.files}
-                        categoryStatuses={data.categoryStatuses}
                         onRefresh={refreshRelated}
                         isAdmin
-                        categories={PO_FILE_CATEGORIES}
-                        title="PO Document Upload"
-                        hint={`Attach purchase order documents (max ${MAX_FILE_SIZE_MB}MB per file). Multiple files allowed.`}
-                        hideChrome={false}
                       />
                     }
                   />

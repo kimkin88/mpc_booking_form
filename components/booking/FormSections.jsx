@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, isValidElement, cloneElement } from 'react';
 import styled from 'styled-components';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -282,17 +282,35 @@ export function CampaignDetailsSection({
           />
         )}
         {isShown(fieldHidden, 'po_number') && (
-          <Input
-            label="PO Number"
-            name="po_number"
-            required={!!fieldRequired.po_number}
-            value={values.po_number || ''}
-            onChange={(e) => onChange('po_number', e.target.value)}
-            error={errors.po_number}
-            disabled={readOnly || fieldDisabled.po_number}
-            placeholder="PO-12345"
-          />
+          poFiles && isValidElement(poFiles) ? (
+            cloneElement(poFiles, {
+              poNumberField: (
+                <Input
+                  label="PO Number"
+                  name="po_number"
+                  required={!!fieldRequired.po_number}
+                  value={values.po_number || ''}
+                  onChange={(e) => onChange('po_number', e.target.value)}
+                  error={errors.po_number}
+                  disabled={readOnly || fieldDisabled.po_number}
+                  placeholder="PO-12345"
+                />
+              ),
+            })
+          ) : (
+            <Input
+              label="PO Number"
+              name="po_number"
+              required={!!fieldRequired.po_number}
+              value={values.po_number || ''}
+              onChange={(e) => onChange('po_number', e.target.value)}
+              error={errors.po_number}
+              disabled={readOnly || fieldDisabled.po_number}
+              placeholder="PO-12345"
+            />
+          )
         )}
+        {!isShown(fieldHidden, 'po_number') && poFiles ? <div>{poFiles}</div> : null}
       </Grid>
       <Grid $cols={2} style={{ marginTop: '1rem' }}>
         {isShown(fieldHidden, 'budget') && (
@@ -399,8 +417,6 @@ export function CampaignDetailsSection({
           />
         </Grid>
       )}
-
-      {poFiles && <NestedFiles>{poFiles}</NestedFiles>}
     </Section>
   );
 }

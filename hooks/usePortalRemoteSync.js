@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { portalRequest } from '@/lib/apiClient';
-import { bookingSyncFingerprint, filesFingerprint } from '@/lib/syncFingerprints';
+import {
+  bookingSyncFingerprint,
+  diffBookingSyncFingerprint,
+  filesFingerprint,
+} from '@/lib/syncFingerprints';
 
 export { filesFingerprint } from '@/lib/syncFingerprints';
 
@@ -35,7 +39,9 @@ export function usePortalRemoteSync({
   }, [saving]);
 
   useEffect(() => {
-    fingerprintRef.current = localFingerprint;
+    if (localFingerprint != null) {
+      fingerprintRef.current = localFingerprint;
+    }
   }, [localFingerprint]);
 
   useEffect(() => {
@@ -65,23 +71,21 @@ export function usePortalRemoteSync({
 
       if (remote === known) return;
 
-      const prevFiles = known.split('::')[1] || '';
-      const nextFiles = remote.split('::')[1] || '';
-      const filesChanged = prevFiles !== nextFiles;
-      const versionChanged =
-        String(result?.booking?.current_version ?? '') !== String(known.split('::')[0] || '');
+      const diff = diffBookingSyncFingerprint(known, remote);
+      if (!diff.meaningful) {
+        fingerprintRef.current = remote;
+        return;
+      }
 
       const now = Date.now();
-      const allowToast = now - lastToastAtRef.current > 8000;
+      const allowToast = diff.meaningful && now - lastToastAtRef.current > 8000;
 
       await onRemoteUpdateRef.current?.(result, {
         softSync: isBusy,
-        versionChanged,
-        filesChanged,
         allowToast,
+        ...diff,
       });
 
-      // Always advance fingerprint after applying so we don't re-fire every poll
       fingerprintRef.current = remote;
       if (allowToast) lastToastAtRef.current = now;
     } catch {
@@ -99,7 +103,7 @@ export function usePortalRemoteSync({
       if (!cancelled) check();
     };
 
-    run(); // immediate tick
+    run();
     const timer = setInterval(run, intervalMs);
     const onVisible = () => {
       if (document.visibilityState === 'visible') run();

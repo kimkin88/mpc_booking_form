@@ -68,9 +68,11 @@ export const TabsContent = styled(TabsPrimitive.Content)`
 const TooltipContent = styled(TooltipPrimitive.Content)`
   background: ${({ theme }) => theme.colors.bgDark};
   color: ${({ theme }) => theme.colors.textInverse};
-  padding: 0.35rem 0.6rem;
+  padding: 0.5rem 0.7rem;
   border-radius: ${({ theme }) => theme.radii.sm};
   font-size: ${({ theme }) => theme.fontSizes.xs};
+  line-height: 1.45;
+  max-width: min(280px, calc(100vw - 2rem));
   z-index: ${({ theme }) => theme.zIndex.dropdown};
 `;
 

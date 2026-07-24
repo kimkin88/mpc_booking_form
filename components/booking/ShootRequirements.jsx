@@ -21,11 +21,15 @@ import {
 import { formatDate, toDateInputValue } from '@/utils/format';
 
 const RowCard = styled.div`
-  border: 1px solid ${({ theme }) => theme.colors.border};
+  border: 1px solid
+    ${({ theme, $variant }) =>
+      $variant === 'draft' ? theme.colors.borderStrong : theme.colors.border};
+  border-style: ${({ $variant }) => ($variant === 'draft' ? 'dashed' : 'solid')};
   border-radius: ${({ theme }) => theme.radii.md};
   padding: ${({ theme }) => theme.space[4]};
   margin-bottom: ${({ theme }) => theme.space[3]};
-  background: ${({ theme }) => theme.colors.bgMuted};
+  background: ${({ theme, $variant }) =>
+    $variant === 'draft' ? theme.colors.bgMuted : theme.colors.surface};
 `;
 
 const BudgetBar = styled.div`
@@ -317,7 +321,7 @@ export function ShootRequirementsSection({
             : costForDayLength(entry.day_length, rates);
 
         return (
-          <RowCard key={entry.id}>
+          <RowCard key={entry.id} $variant="saved">
             <Grid $cols={3}>
               <Select
                 label="Shoot Day Length"
@@ -363,7 +367,7 @@ export function ShootRequirementsSection({
       })}
 
       {showDraftRow && (
-        <RowCard>
+        <RowCard $variant="draft">
           <Grid $cols={3}>
             <Select
               label="Shoot Day Length"

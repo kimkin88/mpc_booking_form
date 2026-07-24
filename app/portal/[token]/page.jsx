@@ -15,6 +15,7 @@ import {
 import { ShootRequirementsSection } from '@/components/booking/ShootRequirements';
 import { CalendarSection } from '@/components/booking/ScheduleSites';
 import { FilesSection } from '@/components/files/FilesSection';
+import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { PortalSectionNav } from '@/components/booking/PortalSectionNav';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
@@ -25,8 +26,6 @@ import {
   BOOKING_SECTIONS,
   BOOKING_STATUSES,
   DELIVERABLE_FILE_CATEGORIES,
-  MAX_FILE_SIZE_MB,
-  PO_FILE_CATEGORIES,
 } from '@/lib/constants';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { usePortalRemoteSync } from '@/hooks/usePortalRemoteSync';
@@ -404,7 +403,7 @@ export default function PortalPage() {
           });
           return next;
         });
-        if (meta.allowToast) {
+        if (meta.allowToast && (unlocked || meta.filesChanged)) {
           if (unlocked) toast('Editing unlocked — you can make changes again');
           else if (meta.filesChanged) toast('Files updated');
         }
@@ -416,10 +415,10 @@ export default function PortalPage() {
       setDirty(false);
       revisionRef.current = 0;
       setSaveStatus('idle');
-      if (meta.allowToast !== false) {
+      if (meta.allowToast && (unlocked || meta.meaningful !== false)) {
         if (unlocked) toast('Editing unlocked — you can make changes again');
         else if (meta.filesChanged && !meta.versionChanged) toast('Files updated');
-        else toast('Booking updated');
+        else if (meta.meaningful || meta.versionChanged) toast('Booking updated');
       }
     },
     [toast]
@@ -901,17 +900,13 @@ export default function PortalPage() {
               scheduleEntries={data.schedule}
               poFiles={
                 !fieldHidden.files ? (
-                  <FilesSection
+                  <PoDocumentUploader
                     bookingId={form.id}
                     files={data.files}
-                    categoryStatuses={data.categoryStatuses}
                     onRefresh={loadPortal}
                     readOnly={readOnly || fieldDisabled.files}
                     isAdmin={false}
                     portalToken={token}
-                    categories={PO_FILE_CATEGORIES}
-                    title="PO Document Upload"
-                    hint={`Purchase order documents (max ${MAX_FILE_SIZE_MB}MB each).`}
                   />
                 ) : null
               }

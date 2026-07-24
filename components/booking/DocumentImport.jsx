@@ -193,7 +193,7 @@ export function DocumentImportDialog({
     setOverwrite(true);
     setAddSites(true);
     setAddSchedule(true);
-    setUseAi(true);
+    setUseAi(false);
   };
 
   const close = (next) => {

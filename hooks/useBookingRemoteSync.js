@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { api } from '@/lib/apiClient';
-import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
+import {
+  bookingSyncFingerprint,
+  diffBookingSyncFingerprint,
+} from '@/lib/syncFingerprints';
 
 /**
  * Polls the full booking payload so admin sees portal (and other-tab) changes live.
@@ -35,7 +38,10 @@ export function useBookingRemoteSync(
   }, [saving]);
 
   useEffect(() => {
-    fingerprintRef.current = localFingerprint;
+    // Keep poll baseline aligned after local load/save, without forcing toasts.
+    if (localFingerprint != null) {
+      fingerprintRef.current = localFingerprint;
+    }
   }, [localFingerprint]);
 
   useEffect(() => {
@@ -68,13 +74,21 @@ export function useBookingRemoteSync(
       const known = fingerprintRef.current;
       if (remote === known) return;
 
+      const diff = diffBookingSyncFingerprint(known, remote);
+      // Ignore non-meaningful fingerprint noise (unstable timestamps, etc.)
+      if (!diff.meaningful) {
+        fingerprintRef.current = remote;
+        return;
+      }
+
       const isBusy = dirtyRef.current || savingRef.current;
       const now = Date.now();
-      const allowToast = now - lastToastAtRef.current > 8000;
+      const allowToast = diff.meaningful && now - lastToastAtRef.current > 8000;
 
       await onRemoteUpdateRef.current?.(result, {
         softSync: isBusy,
         allowToast,
+        ...diff,
         remoteVersion: result?.booking?.current_version,
       });
 

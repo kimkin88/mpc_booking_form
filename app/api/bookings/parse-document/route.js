@@ -23,7 +23,7 @@ export async function POST(request) {
     const file = form.get('file');
     const sheetName = form.get('sheetName') ? String(form.get('sheetName')) : null;
     const useAiRaw = form.get('useAi');
-    const useAi = useAiRaw == null ? true : String(useAiRaw) !== '0' && String(useAiRaw) !== 'false';
+    const useAi = useAiRaw != null && String(useAiRaw) !== '0' && String(useAiRaw) !== 'false';
 
     if (!file || typeof file === 'string') {
       return jsonError('Upload an Excel media plan or brief (.xlsx)', 400);

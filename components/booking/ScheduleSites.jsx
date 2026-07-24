@@ -10,7 +10,7 @@ import { Badge, EmptyState } from '@/components/ui/Tabs';
 import { EditIconButton, RemoveIconButton } from '@/components/ui/IconButton';
 import { Section, SectionTitle, SectionHint, Grid, Row } from '@/components/layout/PageHeader';
 import { SHOOT_FORMATS } from '@/lib/constants';
-import { formatDate, toDateInputValue } from '@/utils/format';
+import { formatDate, formatCurrency, toDateInputValue } from '@/utils/format';
 
 const CalendarShell = styled.div`
   background: ${({ theme }) => theme.colors.surface};
@@ -138,9 +138,15 @@ const DayNumber = styled.span`
 `;
 
 const DayMeta = styled.span`
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  line-height: 1;
+  line-height: 1.15;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.15rem;
   color: ${({ theme, $selected }) => ($selected ? theme.colors.primary : theme.colors.accent)};
   min-height: 0.65rem;
 `;
@@ -202,8 +208,33 @@ const EntryCard = styled.div`
   border-radius: ${({ theme }) => theme.radii.md};
   padding: ${({ theme }) => theme.space[4]};
   margin-bottom: ${({ theme }) => theme.space[3]};
-  background: ${({ theme }) => theme.colors.bgMuted};
+  background: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
+`;
+
+const EntryTitle = styled.p`
+  margin: 0 0 ${({ theme }) => theme.space[3]};
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  font-size: ${({ theme }) => theme.fontSizes.md};
+`;
+
+const EntryMeta = styled.dl`
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+
+  dt {
+    margin: 0;
+    color: ${({ theme }) => theme.colors.textMuted};
+  }
+
+  dd {
+    margin: 0;
+    font-weight: ${({ theme }) => theme.fontWeights.medium};
+    color: ${({ theme }) => theme.colors.text};
+  }
 `;
 
 const FieldError = styled.p`
@@ -642,15 +673,54 @@ export function ScheduleSection({
   );
 }
 
+function dayLengthLabel(dayLength) {
+  const n = Number(dayLength);
+  if (n === 0.5) return '0.5 day';
+  if (n === 1) return '1 day';
+  if (Number.isFinite(n) && n > 0) return `${n} day`;
+  return null;
+}
+
+function shootCellLabel(dayEntries = []) {
+  if (!dayEntries.length) return '\u00A0';
+  if (dayEntries.length > 1) return `${dayEntries.length} shoots`;
+  const e = dayEntries[0];
+  const length = dayLengthLabel(e.day_length);
+  const city = e.city ? String(e.city).trim() : '';
+  if (length && city) return `${length.replace(' day', 'd')} · ${city}`;
+  if (city) return city;
+  if (length) return length;
+  return 'Shoot';
+}
+
+function shootAriaLabel(dayEntries = []) {
+  if (!dayEntries.length) return '';
+  return dayEntries
+    .map((e) => {
+      const parts = [
+        dayLengthLabel(e.day_length),
+        e.city || null,
+        e.applied_rate != null
+          ? formatCurrency(e.applied_rate, e.applied_currency || 'GBP')
+          : null,
+      ].filter(Boolean);
+      return parts.join(', ') || 'Shoot';
+    })
+    .join('; ');
+}
+
 /** Section 5 — Calendar of preferred shoot dates from booking requirements */
 export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(null);
 
-  const entryCountByDate = useMemo(() => {
+  const entriesByDate = useMemo(() => {
     const map = new Map();
     entries.forEach((e) => {
-      map.set(e.shoot_date, (map.get(e.shoot_date) || 0) + 1);
+      const key = e.shoot_date ? String(e.shoot_date).slice(0, 10) : null;
+      if (!key) return;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(e);
     });
     return map;
   }, [entries]);
@@ -669,7 +739,8 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
   }, [cursor]);
 
   const todayKey = toKey(new Date());
-  const selectedEntries = entries.filter((e) => e.shoot_date === selected);
+  const selectedKey = selected ? String(selected).slice(0, 10) : null;
+  const selectedEntries = selectedKey ? entriesByDate.get(selectedKey) || [] : [];
 
   const goToday = () => {
     const now = new Date();
@@ -681,8 +752,8 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
     <Section id={id}>
       <SectionTitle>Calendar</SectionTitle>
       <SectionHint>
-        Preferred shoot dates from Booking requirements are highlighted. Select a day to see
-        details.
+        Preferred shoot dates are highlighted. Select a day to see full shoot details (length, city,
+        cost).
       </SectionHint>
 
       <CalendarShell>
@@ -725,9 +796,11 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
           {days.map((day) => {
             const key = toKey(day);
             const outside = day.getMonth() !== cursor.getMonth();
-            const count = entryCountByDate.get(key) || 0;
+            const dayEntries = entriesByDate.get(key) || [];
+            const count = dayEntries.length;
             const isToday = key === todayKey;
             const isSelected = selected === key;
+            const shootInfo = shootAriaLabel(dayEntries);
             return (
               <DayCell
                 key={key}
@@ -736,8 +809,9 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
                 $selected={isSelected}
                 $hasEntries={count > 0}
                 $today={isToday && !isSelected}
+                title={shootInfo || undefined}
                 aria-label={`${formatDate(day, locale)}${isToday ? ', today' : ''}${
-                  count ? `, ${count} shoot day${count === 1 ? '' : 's'}` : ''
+                  shootInfo ? `, ${shootInfo}` : ''
                 }${isSelected ? ', selected' : ''}`}
                 aria-pressed={isSelected}
                 onClick={() => {
@@ -748,7 +822,7 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
                 <DayNumber $selected={isSelected} $today={isToday}>
                   {day.getDate()}
                 </DayNumber>
-                <DayMeta $selected={isSelected}>{count > 0 ? `${count}` : '\u00A0'}</DayMeta>
+                <DayMeta $selected={isSelected}>{shootCellLabel(dayEntries)}</DayMeta>
               </DayCell>
             );
           })}
@@ -772,20 +846,60 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
           <SelectedDayPanel>
             <SelectedDayLabel>{formatDate(selected, locale)}</SelectedDayLabel>
             <Badge $tone="accent">
-              {selectedEntries.length} shoot day{selectedEntries.length === 1 ? '' : 's'}
+              {selectedEntries.length} shoot{selectedEntries.length === 1 ? '' : 's'}
             </Badge>
           </SelectedDayPanel>
           {selectedEntries.length === 0 ? (
             <EmptyState style={{ padding: '1.25rem' }}>No preferred shoot on this day.</EmptyState>
           ) : (
-            selectedEntries.map((entry) => (
-              <EntryCard key={entry.id}>
-                <strong>
-                  {entry.day_length ? `${entry.day_length} day` : 'Shoot'}
-                  {entry.city ? ` · ${entry.city}` : ''}
-                </strong>
-              </EntryCard>
-            ))
+            selectedEntries.map((entry, index) => {
+              const length = dayLengthLabel(entry.day_length);
+              const cost =
+                entry.applied_rate != null
+                  ? formatCurrency(entry.applied_rate, entry.applied_currency || 'GBP', locale)
+                  : null;
+              return (
+                <EntryCard key={entry.id}>
+                  <EntryTitle>
+                    Shoot {selectedEntries.length > 1 ? `${index + 1}` : ''}
+                    {length ? ` · ${length}` : ''}
+                    {entry.city ? ` · ${entry.city}` : ''}
+                  </EntryTitle>
+                  <EntryMeta>
+                    <dt>Day length</dt>
+                    <dd>{length || '—'}</dd>
+                    <dt>City</dt>
+                    <dd>{entry.city || '—'}</dd>
+                    <dt>Preferred date</dt>
+                    <dd>{formatDate(entry.shoot_date, locale)}</dd>
+                    <dt>Cost</dt>
+                    <dd>{cost || '—'}</dd>
+                    {entry.format && entry.format !== 'Shoot' && (
+                      <>
+                        <dt>Format</dt>
+                        <dd>{entry.format}</dd>
+                      </>
+                    )}
+                    {(entry.live_start || entry.live_end) && (
+                      <>
+                        <dt>Live dates</dt>
+                        <dd>
+                          {entry.live_start ? formatDate(entry.live_start, locale) : '—'}
+                          {' → '}
+                          {entry.live_end ? formatDate(entry.live_end, locale) : '—'}
+                        </dd>
+                      </>
+                    )}
+                    {entry.notes && (
+                      <>
+                        <dt>Notes</dt>
+                        <dd>{entry.notes}</dd>
+                      </>
+                    )}
+                  </EntryMeta>
+                </EntryCard>
+              );
+            })
           )}
         </>
       ) : (

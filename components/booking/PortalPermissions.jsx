@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Badge } from '@/components/ui/Tabs';
+import { Badge, Tooltip } from '@/components/ui/Tabs';
 import { ConfirmDialog } from '@/components/ui/Dialog';
 import { Section, SectionTitle, SectionHint, Row, Grid } from '@/components/layout/PageHeader';
 import { useToast } from '@/components/ui/Toast';
@@ -13,6 +13,40 @@ import { formatDate, formatDateTime } from '@/utils/format';
 import { BOOKING_SECTIONS, BOOKING_STATUSES, DEFAULT_FIELD_PERMISSIONS, DEFAULT_STATUS_PORTAL_EDITABLE, FIELD_LABELS, FIELD_PERMISSIONS } from '@/lib/constants';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+
+const TitleWithHelp = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+`;
+
+const HelpMark = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 1px solid ${({ theme }) => theme.colors.borderStrong};
+  border-radius: 999px;
+  background: ${({ theme }) => theme.colors.bgMuted};
+  color: ${({ theme }) => theme.colors.textMuted};
+  font-size: 0.7rem;
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  line-height: 1;
+  cursor: help;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.text};
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.focus};
+    outline-offset: 2px;
+  }
+`;
 
 const ReminderList = styled.ul`
   margin: 0.75rem 0 0;
@@ -581,13 +615,33 @@ export function PortalControls({ bookingId, portal: portalProp, booking = null, 
       />
 
       <div style={{ marginTop: '1.75rem' }}>
-        <SectionTitle as="h3" style={{ fontSize: '1rem' }}>
-          Editable by booking status
-        </SectionTitle>
+        <TitleWithHelp>
+          <SectionTitle as="h3" style={{ fontSize: '1rem', margin: 0 }}>
+            Editable by booking status
+          </SectionTitle>
+          <Tooltip
+            content={
+              <>
+                Controls whether clients can edit the portal for each booking status.
+                <br />
+                <br />
+                Default: editable until Approved; read-only from Approved onward.
+                <br />
+                <br />
+                Unlock editing overrides the current status and pauses auto-lock until you lock
+                again. Client Submit does not lock the portal by itself.
+              </>
+            }
+          >
+            <HelpMark type="button" aria-label="What is editable by booking status?">
+              ?
+            </HelpMark>
+          </Tooltip>
+        </TitleWithHelp>
         <SectionHint>
-          When a status is off, the portal is read-only for that booking status. Clicking{' '}
-          <strong>Unlock editing</strong> overrides this for the current status and suppresses
-          auto-lock until you lock the portal again. Submit does not lock the portal by itself.
+          Turn a status <strong>on</strong> to let clients edit while the booking is in that status.
+          Turn it <strong>off</strong> to make the portal read-only for that status. Most teams
+          leave the defaults (editable before approval, read-only after).
         </SectionHint>
         {!portal && (
           <AlertBanner>Generate a portal link before configuring status editability.</AlertBanner>

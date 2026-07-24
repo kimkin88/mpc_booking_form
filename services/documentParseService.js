@@ -931,7 +931,7 @@ export function parseBookingDocument(buffer, options = {}) {
  * Heuristic parse + optional OpenAI enrichment (calendar dates, fields, sites).
  */
 export async function parseBookingDocumentSmart(buffer, options = {}) {
-  const { useAi = true, ...rest } = options;
+  const { useAi = false, ...rest } = options;
   const parsed = parseBookingDocument(buffer, rest);
   const sheetRowsForAi = parsed._sheetRows || [];
   delete parsed._sheetRows;
