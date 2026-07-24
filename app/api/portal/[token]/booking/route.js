@@ -23,6 +23,7 @@ import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
 import { notifyAdmins, notifyClient } from '@/services/notificationService';
 import { clientActorFromBooking } from '@/utils/helpers';
+import { assertShootFitsBudget, ratesFromBooking } from '@/lib/rateCard';
 
 export async function PATCH(request, { params }) {
   try {
@@ -146,10 +147,39 @@ export async function PATCH(request, { params }) {
       if (!validation.success) {
         return jsonError(validation.error.issues?.[0]?.message || 'Validation failed', 400);
       }
+      const row = {
+        ...validation.data,
+        format: validation.data.format || 'Shoot',
+        day_length:
+          validation.data.day_length != null && validation.data.day_length !== ''
+            ? Number(validation.data.day_length)
+            : null,
+        applied_rate:
+          validation.data.applied_rate != null && validation.data.applied_rate !== ''
+            ? Number(validation.data.applied_rate)
+            : null,
+        applied_currency: validation.data.applied_currency || booking.currency || 'GBP',
+      };
       const supabase = createServiceClient();
+      if (row.day_length != null) {
+        const { data: existing } = await supabase
+          .from('schedule_entries')
+          .select('*')
+          .eq('booking_id', booking.id);
+        try {
+          assertShootFitsBudget(
+            booking.budget,
+            existing || [],
+            ratesFromBooking(booking),
+            row.day_length
+          );
+        } catch (err) {
+          return jsonError(err.message, 400);
+        }
+      }
       const { data, error } = await supabase
         .from('schedule_entries')
-        .insert({ booking_id: booking.id, ...validation.data })
+        .insert({ booking_id: booking.id, ...row })
         .select()
         .single();
       if (error) return jsonError(error.message, 500);
@@ -176,11 +206,15 @@ export async function PATCH(request, { params }) {
       if (!canClientEdit(getFieldPermission(permissionsMap, 'schedule'))) {
         return jsonError('Schedule is not editable', 403);
       }
-      const { entryId, shoot_date, format, live_start, live_end, notes } = body;
+      const { entryId, shoot_date, format, day_length, city, applied_rate, applied_currency, live_start, live_end, notes } = body;
       if (!entryId) return jsonError('entryId is required', 400);
       const validation = validateScheduleEntry({
         shoot_date,
-        format,
+        format: format || 'Shoot',
+        day_length,
+        city,
+        applied_rate,
+        applied_currency,
         live_start,
         live_end,
         notes,
@@ -189,9 +223,40 @@ export async function PATCH(request, { params }) {
         return jsonError(validation.error.issues?.[0]?.message || 'Validation failed', 400);
       }
       const supabase = createServiceClient();
+      const nextLength =
+        validation.data.day_length != null && validation.data.day_length !== ''
+          ? Number(validation.data.day_length)
+          : null;
+      if (nextLength != null) {
+        const { data: existing } = await supabase
+          .from('schedule_entries')
+          .select('*')
+          .eq('booking_id', booking.id);
+        try {
+          assertShootFitsBudget(
+            booking.budget,
+            existing || [],
+            ratesFromBooking(booking),
+            nextLength,
+            { excludeEntryId: entryId }
+          );
+        } catch (err) {
+          return jsonError(err.message, 400);
+        }
+      }
       const { data, error } = await supabase
         .from('schedule_entries')
-        .update(validation.data)
+        .update({
+          ...validation.data,
+          format: validation.data.format || 'Shoot',
+          day_length: nextLength,
+          applied_rate:
+            validation.data.applied_rate != null && validation.data.applied_rate !== ''
+              ? Number(validation.data.applied_rate)
+              : null,
+          applied_currency:
+            validation.data.applied_currency || booking.currency || 'GBP',
+        })
         .eq('id', entryId)
         .eq('booking_id', booking.id)
         .select()

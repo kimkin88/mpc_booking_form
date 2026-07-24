@@ -4,6 +4,7 @@ import {
   getPortalByBooking,
   setPortalPin,
   updatePortalStatus,
+  unlockPortalForEditing,
   toAdminPortalView,
 } from '@/services/portalService';
 
@@ -43,24 +44,46 @@ export async function POST(request, { params }) {
       return jsonOk(toAdminPortalView(portal, request));
     }
 
+    if (action === 'unlock') {
+      const result = await unlockPortalForEditing(id, auth.actor);
+      return jsonOk({
+        ...toAdminPortalView(result.portal, request),
+        _meta: {
+          autoLockDisabled: result.autoLockDisabled,
+          bookingStatus: result.bookingStatus,
+          portalLockDate: result.portalLockDate,
+        },
+      });
+    }
+
     if (
-      ['lock', 'unlock', 'disable', 'enable', 'lock_editing', 'unlock_editing', 'set_expiry'].includes(
-        action
-      )
+      ['lock', 'disable', 'enable', 'lock_editing', 'unlock_editing', 'set_expiry'].includes(action)
     ) {
       const updates = {};
       if (action === 'lock') {
         updates.status = 'locked';
         updates.editing_locked = true;
+        updates.manual_unlock = false;
       }
-      if (action === 'unlock') {
+      if (action === 'disable') {
+        updates.status = 'disabled';
+        updates.manual_unlock = false;
+      }
+      if (action === 'enable') {
         updates.status = 'active';
         updates.editing_locked = false;
       }
-      if (action === 'disable') updates.status = 'disabled';
-      if (action === 'enable') updates.status = 'active';
-      if (action === 'lock_editing') updates.editing_locked = true;
-      if (action === 'unlock_editing') updates.editing_locked = false;
+      if (action === 'lock_editing') {
+        updates.editing_locked = true;
+        updates.manual_unlock = false;
+        // Keep status consistent so client isPortaleditable stays false
+        updates.status = 'locked';
+      }
+      if (action === 'unlock_editing') {
+        // Soft path → full unlock semantics so it actually works on the client
+        const result = await unlockPortalForEditing(id, auth.actor);
+        return jsonOk(toAdminPortalView(result.portal, request));
+      }
       if (action === 'set_expiry') updates.expires_at = body.expires_at ?? null;
 
       const portal = await updatePortalStatus(id, updates, auth.actor);

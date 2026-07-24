@@ -369,10 +369,18 @@ export function FilesSection({
   isAdmin = true,
   portalToken = null,
   id,
+  categories = FILE_CATEGORIES,
+  title = 'Files & Assets',
+  hint = null,
+  hideChrome = false,
 }) {
   const { toast } = useToast();
   const inputRef = useRef(null);
-  const [activeCategory, setActiveCategory] = useState(FILE_CATEGORIES[0].value);
+  const categoryList = categories?.length ? categories : FILE_CATEGORIES;
+  const [activeCategory, setActiveCategory] = useState(categoryList[0].value);
+  const resolvedCategory = categoryList.some((c) => c.value === activeCategory)
+    ? activeCategory
+    : categoryList[0].value;
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -450,7 +458,7 @@ export function FilesSection({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   action: 'prepare',
-                  category: activeCategory,
+                  category: resolvedCategory,
                   description: description || null,
                   files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
                 }),
@@ -463,7 +471,7 @@ export function FilesSection({
             })()
           : await api.post(filesEndpoint, {
               action: 'prepare',
-              category: activeCategory,
+              category: resolvedCategory,
               description: description || null,
               files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
             });
@@ -526,7 +534,7 @@ export function FilesSection({
       }
     },
     [
-      activeCategory,
+      resolvedCategory,
       bookingId,
       clearPendingPreviews,
       description,
@@ -677,27 +685,30 @@ export function FilesSection({
 
   return (
     <Section id={id}>
-      <SectionTitle>Files & Assets</SectionTitle>
-      <SectionHint>
-        Multiple files per category. Maximum file size: {MAX_FILE_SIZE_MB}MB per file.
-        Supported: {ALLOWED_EXTENSIONS_LABEL}. Images show a thumbnail — click to enlarge.
-      </SectionHint>
+      {!hideChrome && <SectionTitle>{title}</SectionTitle>}
+      {!hideChrome && (
+        <SectionHint>
+          {hint ||
+            `Multiple files per category. Maximum file size: ${MAX_FILE_SIZE_MB}MB per file. Supported: ${ALLOWED_EXTENSIONS_LABEL}. Images show a thumbnail — click to enlarge.`}
+        </SectionHint>
+      )}
 
       <Select
-        label="Active category for upload"
-        value={activeCategory}
+        label={hideChrome ? 'Upload to' : 'Active category for upload'}
+        value={resolvedCategory}
         onValueChange={setActiveCategory}
-        options={FILE_CATEGORIES}
+        options={categoryList}
       />
 
       {!readOnly && (
         <>
-          <Input
-            label="Description (optional)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            style={{ marginTop: '1rem' }}
-          />
+          <div style={{ marginTop: '1.25rem' }}>
+            <Input
+              label="Description (optional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
           <DropZone
             $active={dragActive}
             role="button"
@@ -776,7 +787,7 @@ export function FilesSection({
       )}
 
       <div style={{ marginTop: '1.5rem' }}>
-        {FILE_CATEGORIES.map((cat) => {
+        {categoryList.map((cat) => {
           const catFiles = filesFor(cat.value);
           const status = statusFor(cat.value);
           return (

@@ -30,6 +30,7 @@ export function formatCurrency(amount, currency = 'GBP', locale = 'en-GB') {
     style: 'currency',
     currency,
     maximumFractionDigits: 2,
+    useGrouping: false,
   }).format(num);
 }
 

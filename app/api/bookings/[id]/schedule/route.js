@@ -3,6 +3,27 @@ import { validateScheduleEntry } from '@/lib/validation';
 import { createServiceClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
+import { assertShootFitsBudget, costForDayLength, ratesFromBooking } from '@/lib/rateCard';
+
+function normalizeSchedulePayload(data, booking) {
+  const rates = ratesFromBooking(booking || {});
+  const dayLength =
+    data.day_length != null && data.day_length !== '' ? Number(data.day_length) : null;
+  const applied =
+    data.applied_rate != null && data.applied_rate !== ''
+      ? Number(data.applied_rate)
+      : dayLength != null
+        ? costForDayLength(dayLength, rates)
+        : null;
+  return {
+    ...data,
+    format: data.format || 'Shoot',
+    day_length: dayLength,
+    city: data.city || null,
+    applied_rate: applied,
+    applied_currency: data.applied_currency || booking?.currency || 'GBP',
+  };
+}
 
 export async function GET(_request, { params }) {
   const auth = await requireAdmin();
@@ -31,11 +52,30 @@ export async function POST(request, { params }) {
     }
 
     const supabase = createServiceClient();
+
+    const [{ data: booking }, { data: existing }] = await Promise.all([
+      supabase.from('bookings').select('*').eq('id', id).single(),
+      supabase.from('schedule_entries').select('*').eq('booking_id', id),
+    ]);
+    const row = normalizeSchedulePayload(validation.data, booking);
+    if (booking && row.day_length != null) {
+      try {
+        assertShootFitsBudget(
+          booking.budget,
+          existing || [],
+          ratesFromBooking(booking),
+          row.day_length
+        );
+      } catch (err) {
+        return jsonError(err.message, 400);
+      }
+    }
+
     const { data, error } = await supabase
       .from('schedule_entries')
       .insert({
         booking_id: id,
-        ...validation.data,
+        ...row,
         created_by: auth.actor.id,
         updated_by: auth.actor.id,
       })
@@ -84,9 +124,29 @@ export async function PATCH(request, { params }) {
     }
 
     const supabase = createServiceClient();
+
+    const [{ data: booking }, { data: existing }] = await Promise.all([
+      supabase.from('bookings').select('*').eq('id', id).single(),
+      supabase.from('schedule_entries').select('*').eq('booking_id', id),
+    ]);
+    const row = normalizeSchedulePayload(validation.data, booking);
+    if (booking && row.day_length != null) {
+      try {
+        assertShootFitsBudget(
+          booking.budget,
+          existing || [],
+          ratesFromBooking(booking),
+          row.day_length,
+          { excludeEntryId: entryId }
+        );
+      } catch (err) {
+        return jsonError(err.message, 400);
+      }
+    }
+
     const { data, error } = await supabase
       .from('schedule_entries')
-      .update({ ...validation.data, updated_by: auth.actor.id })
+      .update({ ...row, updated_by: auth.actor.id })
       .eq('id', entryId)
       .eq('booking_id', id)
       .select()

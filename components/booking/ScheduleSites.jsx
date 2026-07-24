@@ -642,6 +642,161 @@ export function ScheduleSection({
   );
 }
 
+/** Section 5 — Calendar of preferred shoot dates from booking requirements */
+export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
+  const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
+  const [selected, setSelected] = useState(null);
+
+  const entryCountByDate = useMemo(() => {
+    const map = new Map();
+    entries.forEach((e) => {
+      map.set(e.shoot_date, (map.get(e.shoot_date) || 0) + 1);
+    });
+    return map;
+  }, [entries]);
+
+  const days = useMemo(() => {
+    const first = startOfMonth(cursor);
+    const start = new Date(first);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const cells = [];
+    for (let i = 0; i < 42; i += 1) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      cells.push(d);
+    }
+    return cells;
+  }, [cursor]);
+
+  const todayKey = toKey(new Date());
+  const selectedEntries = entries.filter((e) => e.shoot_date === selected);
+
+  const goToday = () => {
+    const now = new Date();
+    setCursor(startOfMonth(now));
+    setSelected(toKey(now));
+  };
+
+  return (
+    <Section id={id}>
+      <SectionTitle>Calendar</SectionTitle>
+      <SectionHint>
+        Preferred shoot dates from Booking requirements are highlighted. Select a day to see
+        details.
+      </SectionHint>
+
+      <CalendarShell>
+        <MonthNav>
+          <NavButtons>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label="Previous month"
+              onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
+            >
+              ← Prev
+            </Button>
+          </NavButtons>
+          <MonthTitle>
+            {cursor.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
+          </MonthTitle>
+          <NavButtons>
+            <Button variant="secondary" size="sm" onClick={goToday}>
+              Today
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label="Next month"
+              onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}
+            >
+              Next →
+            </Button>
+          </NavButtons>
+        </MonthNav>
+
+        <Weekdays aria-hidden>
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <Weekday key={d}>{d}</Weekday>
+          ))}
+        </Weekdays>
+
+        <Calendar role="grid" aria-label="Preferred shoot dates calendar">
+          {days.map((day) => {
+            const key = toKey(day);
+            const outside = day.getMonth() !== cursor.getMonth();
+            const count = entryCountByDate.get(key) || 0;
+            const isToday = key === todayKey;
+            const isSelected = selected === key;
+            return (
+              <DayCell
+                key={key}
+                type="button"
+                $outside={outside}
+                $selected={isSelected}
+                $hasEntries={count > 0}
+                $today={isToday && !isSelected}
+                aria-label={`${formatDate(day, locale)}${isToday ? ', today' : ''}${
+                  count ? `, ${count} shoot day${count === 1 ? '' : 's'}` : ''
+                }${isSelected ? ', selected' : ''}`}
+                aria-pressed={isSelected}
+                onClick={() => {
+                  setSelected(key);
+                  if (outside) setCursor(startOfMonth(day));
+                }}
+              >
+                <DayNumber $selected={isSelected} $today={isToday}>
+                  {day.getDate()}
+                </DayNumber>
+                <DayMeta $selected={isSelected}>{count > 0 ? `${count}` : '\u00A0'}</DayMeta>
+              </DayCell>
+            );
+          })}
+        </Calendar>
+
+        <CalendarLegend>
+          <LegendItem>
+            <LegendSwatch $tone="today" /> Today
+          </LegendItem>
+          <LegendItem>
+            <LegendSwatch $tone="booked" /> Preferred shoot date
+          </LegendItem>
+          <LegendItem>
+            <LegendSwatch $tone="selected" /> Selected
+          </LegendItem>
+        </CalendarLegend>
+      </CalendarShell>
+
+      {selected ? (
+        <>
+          <SelectedDayPanel>
+            <SelectedDayLabel>{formatDate(selected, locale)}</SelectedDayLabel>
+            <Badge $tone="accent">
+              {selectedEntries.length} shoot day{selectedEntries.length === 1 ? '' : 's'}
+            </Badge>
+          </SelectedDayPanel>
+          {selectedEntries.length === 0 ? (
+            <EmptyState style={{ padding: '1.25rem' }}>No preferred shoot on this day.</EmptyState>
+          ) : (
+            selectedEntries.map((entry) => (
+              <EntryCard key={entry.id}>
+                <strong>
+                  {entry.day_length ? `${entry.day_length} day` : 'Shoot'}
+                  {entry.city ? ` · ${entry.city}` : ''}
+                </strong>
+              </EntryCard>
+            ))
+          )}
+        </>
+      ) : (
+        <EmptyState style={{ padding: '1.5rem' }}>
+          Select a highlighted day to see shoot details.
+        </EmptyState>
+      )}
+    </Section>
+  );
+}
+
 export function SitesSection({
   values,
   onChange,

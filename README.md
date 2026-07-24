@@ -20,8 +20,12 @@ Secure booking management for the internal admin team, with a shareable client p
 - Optimistic concurrency via booking version numbers
 - Version history with full/section/field/file revert (creates a new version)
 - In-app notifications for portal and file events
+- Near-realtime admin ↔ portal sync (fields, shoots, files, lock/permissions)
+- Auto-lock + missing-field reminders (cron)
 
-## Prerequisites
+## How to use
+
+See **[USAGE_GUIDE.md](./USAGE_GUIDE.md)** for admin and client step-by-step flows.
 
 1. Node.js 20+
 2. A [Supabase](https://supabase.com) project
@@ -53,6 +57,10 @@ Optional:
 
 - `MAX_FILE_SIZE_BYTES` (default `26214400` / 25MB)
 - `MALWARE_SCAN_ENABLED` (default off — see assumptions)
+- `CRON_SECRET` — shared secret for `/api/cron/portal-automation` (Vercel Cron uses `Authorization: Bearer <CRON_SECRET>`)
+- `AUTO_LOCK_ENABLED` — default `true`; set `false` to disable auto-lock globally
+- `REMINDER_OFFSETS_DAYS` — default `3,1` (days before lock date to send missing-field reminders)
+- Gmail credentials are currently hard-coded in `lib/email.js` for local use (`GMAIL_USER` / app password). Move to env before production.
 
 ### 3. Database & storage
 
@@ -155,14 +163,14 @@ public/               # Static assets
 2. **Client file deletion:** soft-delete only; clients may remove their own uploads.
 3. **Max file size:** 25MB. Allowed types: common images, PDF, Office docs, CSV, TXT, ZIP/RAR/7Z. Uploads go **direct to Supabase Storage** (signed URLs) so they work on Vercel despite the 4.5MB serverless body limit.
 4. **Booking status → portal editability:** configurable per portal (defaults: editable through review/changes; read-only after approval/completion).
-5. **Automated portal lock/expiry:** not enabled by default (optional expiry exists for admins).
+5. **Automated portal lock:** enabled when `portal_lock_date` is set (from campaign start / in-charge). Daily cron + lazy lock on portal open. Per-booking toggle available. Reminder offsets default to 3 and 1 days before lock.
 6. **Client access:** token-only via the unique link.
 7. **File version history:** admin-only.
 8. **Comments:** booking-level client notes only (no per-field comments).
 9. **Submit:** does **not** auto-lock editing.
 10. **Audit retention:** indefinite (no auto-purge).
 11. **Client identity:** single portal identity per booking via the unique link, not multi-user client accounts.
-12. **Notifications:** persisted in-app; email provider can be wired later without schema changes.
+12. **Notifications:** persisted in-app; email via Gmail (Nodemailer) when `GMAIL_USER` + `GMAIL_APP_PASSWORD` are set (otherwise stubbed/logged).
 13. **Malware scanning:** stubbed behind `MALWARE_SCAN_ENABLED` — wire a real engine before production.
 
 ## Acceptance criteria coverage

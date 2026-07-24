@@ -8,13 +8,12 @@ import { Input } from '@/components/ui/Input';
 import { Badge, EmptyState, Spinner } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
 import {
-  ReferenceBudgetSection,
-  ClientCampaignSection,
-  JcdContactSection,
-  InvoiceSection,
-  ClientNotesSection,
+  CampaignDetailsSection,
+  ContactInformationSection,
+  DeliverablesSection,
 } from '@/components/booking/FormSections';
-import { ScheduleSection, SitesSection } from '@/components/booking/ScheduleSites';
+import { ShootRequirementsSection } from '@/components/booking/ShootRequirements';
+import { CalendarSection } from '@/components/booking/ScheduleSites';
 import { FilesSection } from '@/components/files/FilesSection';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { PortalSectionNav } from '@/components/booking/PortalSectionNav';
@@ -22,9 +21,16 @@ import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { portalRequest } from '@/lib/apiClient';
 import { buildClientFieldState, canClientEdit, getFieldPermission } from '@/lib/permissions';
-import { BOOKING_SECTIONS, BOOKING_STATUSES } from '@/lib/constants';
+import {
+  BOOKING_SECTIONS,
+  BOOKING_STATUSES,
+  DELIVERABLE_FILE_CATEGORIES,
+  MAX_FILE_SIZE_MB,
+  PO_FILE_CATEGORIES,
+} from '@/lib/constants';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
-import { usePortalRemoteSync, filesFingerprint } from '@/hooks/usePortalRemoteSync';
+import { usePortalRemoteSync } from '@/hooks/usePortalRemoteSync';
+import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 
 function bookingStatusTone(status) {
   if (status === 'approved' || status === 'completed') return 'success';
@@ -337,6 +343,7 @@ export default function PortalPage() {
   const editableRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const saveAgainRef = useRef(false);
+  const saveProgressRef = useRef(null);
 
   useUnsavedChanges(dirty);
 
@@ -363,23 +370,43 @@ export default function PortalPage() {
 
   const applyRemoteUpdate = useCallback(
     (result, meta = {}) => {
+      const wasEditable = editableRef.current;
+      const nowEditable = !!result?.portal?.editable;
+      const unlocked = !wasEditable && nowEditable;
+      // Keep ref in sync before next poll (don't wait for render effect)
+      editableRef.current = nowEditable;
+
       if (meta.softSync) {
         setData((prev) =>
           prev
             ? {
                 ...prev,
-                files: result.files,
-                categoryStatuses: result.categoryStatuses,
-                recentActivity: result.recentActivity,
-                bookingStatus: result.bookingStatus,
-                portal: result.portal,
+                files: result.files ?? prev.files,
+                categoryStatuses: result.categoryStatuses ?? prev.categoryStatuses,
+                recentActivity: result.recentActivity ?? prev.recentActivity,
+                bookingStatus: result.bookingStatus ?? result.booking?.status ?? prev.bookingStatus,
+                portal: result.portal ?? prev.portal,
+                schedule: result.schedule ?? prev.schedule,
+                sites: result.sites ?? prev.sites,
+                permissions: result.permissions ?? prev.permissions,
               }
             : result
         );
-        if (meta.filesChanged) {
-          toast('Files updated');
-        } else {
-          toast('Booking updated');
+        // Keep local edits; sync version + any fields the client cannot edit
+        setForm((prev) => {
+          if (!prev || !result?.booking) return prev;
+          const perms = result.permissions || permissionsRef.current || {};
+          const next = { ...prev, current_version: result.booking.current_version };
+          Object.keys(result.booking).forEach((key) => {
+            if (key === 'current_version') return;
+            if (canClientEdit(getFieldPermission(perms, key))) return;
+            next[key] = result.booking[key];
+          });
+          return next;
+        });
+        if (meta.allowToast) {
+          if (unlocked) toast('Editing unlocked — you can make changes again');
+          else if (meta.filesChanged) toast('Files updated');
         }
         return;
       }
@@ -389,27 +416,33 @@ export default function PortalPage() {
       setDirty(false);
       revisionRef.current = 0;
       setSaveStatus('idle');
-      if (meta.versionChanged) {
-        toast('Booking updated');
-      } else if (meta.filesChanged) {
-        toast('Files updated');
-      } else {
-        toast('Booking updated');
+      if (meta.allowToast !== false) {
+        if (unlocked) toast('Editing unlocked — you can make changes again');
+        else if (meta.filesChanged && !meta.versionChanged) toast('Files updated');
+        else toast('Booking updated');
       }
     },
     [toast]
   );
 
-  const localFilesKey = useMemo(
-    () => filesFingerprint(data?.files, data?.categoryStatuses),
-    [data?.files, data?.categoryStatuses]
+  const localFingerprint = useMemo(
+    () =>
+      bookingSyncFingerprint({
+        booking: form,
+        files: data?.files,
+        categoryStatuses: data?.categoryStatuses,
+        schedule: data?.schedule,
+        sites: data?.sites,
+        permissions: data?.permissions,
+        portal: data?.portal,
+      }),
+    [form, data]
   );
 
   usePortalRemoteSync({
     token,
     enabled: !!data && !loading && !pinRequired && !unavailable,
-    localVersion: form?.current_version,
-    localFilesKey,
+    localFingerprint,
     dirty,
     saving: saveStatus === 'saving',
     onRemoteUpdate: applyRemoteUpdate,
@@ -476,27 +509,22 @@ export default function PortalPage() {
   );
 
   const navSections = useMemo(() => {
-    return BOOKING_SECTIONS.map((section) => {
-      const fields =
-        section.key === 'notes'
-          ? section.fields.filter((key) => key === 'client_notes')
-          : section.fields.filter(
-              (key) => key !== 'internal_notes' && key !== 'status' && key !== 'portal'
-            );
+    const sections = BOOKING_SECTIONS.map((section) => {
+      const fields = section.fields.filter(
+        (key) => key !== 'internal_notes' && key !== 'status' && key !== 'portal'
+      );
       if (!fields.length) return null;
       if (!fields.some((key) => !fieldHidden[key])) return null;
       return {
         id: `portal-${section.key}`,
-        label:
-          section.key === 'notes'
-            ? 'Client Notes'
-            : section.key === 'schedule'
-              ? 'Schedule'
-              : section.key === 'invoice'
-                ? 'Invoice & PO'
-                : section.label,
+        label: section.label,
       };
     }).filter(Boolean);
+
+    if (!fieldHidden.schedule) {
+      sections.push({ id: 'portal-calendar', label: 'Calendar' });
+    }
+    return sections;
   }, [fieldHidden]);
 
   const onChange = (key, value) => {
@@ -571,6 +599,27 @@ export default function PortalPage() {
         setSaveStatus('pending');
         return false;
       } catch (err) {
+        if (err.code === 'VERSION_CONFLICT' || err.status === 409) {
+          try {
+            const latest = await portalRequest(`/api/portal/${token}`);
+            applyRemoteUpdate(latest, { softSync: true, allowToast: false });
+            setForm((f) =>
+              f && latest?.booking
+                ? { ...f, current_version: latest.booking.current_version }
+                : f
+            );
+            setSaveStatus('pending');
+            toast('Remote changes detected — merging and retrying save', { variant: 'warning' });
+            setTimeout(() => {
+              if (dirtyRef.current) saveProgressRef.current?.({ silent: true });
+            }, 250);
+            return false;
+          } catch {
+            setSaveStatus('error');
+            toast(err.message || 'Could not update the form', { variant: 'error' });
+            return false;
+          }
+        }
         setSaveStatus('error');
         toast(err.message || 'Could not update the form', { variant: 'error' });
         return false;
@@ -580,14 +629,18 @@ export default function PortalPage() {
           saveAgainRef.current = false;
           setTimeout(() => {
             if (dirtyRef.current) {
-              saveProgress({ silent: true });
+              saveProgressRef.current?.({ silent: true });
             }
           }, 0);
         }
       }
     },
-    [token, toast]
+    [token, toast, applyRemoteUpdate]
   );
+
+  useEffect(() => {
+    saveProgressRef.current = saveProgress;
+  }, [saveProgress]);
 
   // Debounced auto-save after edits
   useEffect(() => {
@@ -725,6 +778,9 @@ export default function PortalPage() {
       <Badge $tone={readOnly ? 'warning' : 'success'}>
         {readOnly ? 'Read-only' : 'Editable'}
       </Badge>
+      {saveStatus === 'pending' && <Badge $tone="warning">Unsaved</Badge>}
+      {saveStatus === 'saving' && <Badge $tone="info">Saving…</Badge>}
+      {saveStatus === 'saved' && <Badge $tone="success">Saved</Badge>}
       {saveStatus === 'error' && <Badge $tone="danger">Update failed</Badge>}
     </>
   );
@@ -743,12 +799,21 @@ export default function PortalPage() {
           <HeaderActions>
             <HeaderIconBtn
               type="button"
-              aria-label="Reload form"
-              title="Reload form"
-              onClick={() => {
-                // Drop section anchors so reload always hits the full portal URL.
-                const url = `${window.location.pathname}${window.location.search}`;
-                window.location.assign(url);
+              aria-label="Refresh form"
+              title="Refresh form"
+              onClick={async () => {
+                if (dirty && !window.confirm('You have unsaved changes. Refresh and discard them?')) {
+                  return;
+                }
+                try {
+                  setLoading(true);
+                  await loadPortal();
+                  toast('Form refreshed');
+                } catch (err) {
+                  toast(err.message || 'Could not refresh', { variant: 'error' });
+                } finally {
+                  setLoading(false);
+                }
               }}
             >
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -824,8 +889,8 @@ export default function PortalPage() {
                   </SuccessBanner>
                 )}
 
-            <ReferenceBudgetSection
-              id="portal-reference"
+            <CampaignDetailsSection
+              id="portal-campaign"
               values={form}
               onChange={onChange}
               errors={errors}
@@ -833,21 +898,27 @@ export default function PortalPage() {
               fieldDisabled={{ ...fieldDisabled, budget_required: true }}
               fieldHidden={fieldHidden}
               fieldRequired={fieldRequired}
+              scheduleEntries={data.schedule}
+              poFiles={
+                !fieldHidden.files ? (
+                  <FilesSection
+                    bookingId={form.id}
+                    files={data.files}
+                    categoryStatuses={data.categoryStatuses}
+                    onRefresh={loadPortal}
+                    readOnly={readOnly || fieldDisabled.files}
+                    isAdmin={false}
+                    portalToken={token}
+                    categories={PO_FILE_CATEGORIES}
+                    title="PO Document Upload"
+                    hint={`Purchase order documents (max ${MAX_FILE_SIZE_MB}MB each).`}
+                  />
+                ) : null
+              }
             />
 
-            <ClientCampaignSection
-              id="portal-client"
-              values={form}
-              onChange={onChange}
-              errors={errors}
-              readOnly={readOnly}
-              fieldDisabled={fieldDisabled}
-              fieldHidden={fieldHidden}
-              fieldRequired={fieldRequired}
-            />
-
-            <JcdContactSection
-              id="portal-jcd_contact"
+            <ContactInformationSection
+              id="portal-contact"
               values={form}
               onChange={onChange}
               errors={errors}
@@ -858,8 +929,9 @@ export default function PortalPage() {
             />
 
             {!fieldHidden.schedule && (
-              <ScheduleSection
+              <ShootRequirementsSection
                 id="portal-schedule"
+                booking={form}
                 entries={data.schedule}
                 readOnly={readOnly || fieldDisabled.schedule}
                 onAdd={async (entry) => {
@@ -867,7 +939,7 @@ export default function PortalPage() {
                     method: 'PATCH',
                     body: { action: 'add_schedule', data: entry },
                   });
-                  toast('Schedule entry added');
+                  toast('Shoot day added');
                   await loadPortal();
                 }}
                 onUpdate={async (entry) => {
@@ -875,7 +947,7 @@ export default function PortalPage() {
                     method: 'PATCH',
                     body: { action: 'update_schedule', ...entry },
                   });
-                  toast('Schedule entry updated');
+                  toast('Shoot day updated');
                   await loadPortal();
                 }}
                 onRemove={async (entryId) => {
@@ -888,33 +960,8 @@ export default function PortalPage() {
               />
             )}
 
-            <SitesSection
-              id="portal-sites"
-              values={form}
-              onChange={onChange}
-              sites={data.sites}
-              readOnly={readOnly}
-              fieldDisabled={fieldDisabled}
-              fieldHidden={fieldHidden}
-              onAdd={async (entry) => {
-                await portalRequest(`/api/portal/${token}/booking`, {
-                  method: 'PATCH',
-                  body: { action: 'add_site', data: entry },
-                });
-                toast('Site added');
-                await loadPortal();
-              }}
-              onRemove={async (entryId) => {
-                await portalRequest(`/api/portal/${token}/booking`, {
-                  method: 'PATCH',
-                  body: { action: 'remove_site', entryId },
-                });
-                await loadPortal();
-              }}
-            />
-
-            <InvoiceSection
-              id="portal-invoice"
+            <DeliverablesSection
+              id="portal-deliverables"
               values={form}
               onChange={onChange}
               errors={errors}
@@ -922,32 +969,27 @@ export default function PortalPage() {
               fieldDisabled={fieldDisabled}
               fieldHidden={fieldHidden}
               fieldRequired={fieldRequired}
-              allowPoOverride={false}
+              filesSlot={
+                !fieldHidden.files ? (
+                  <FilesSection
+                    bookingId={form.id}
+                    files={data.files}
+                    categoryStatuses={data.categoryStatuses}
+                    onRefresh={loadPortal}
+                    readOnly={readOnly || fieldDisabled.files}
+                    isAdmin={false}
+                    portalToken={token}
+                    categories={DELIVERABLE_FILE_CATEGORIES}
+                    title="Files"
+                    hideChrome
+                  />
+                ) : null
+              }
             />
 
-            <ClientNotesSection
-              id="portal-notes"
-              values={form}
-              onChange={onChange}
-              readOnly={readOnly}
-              fieldDisabled={fieldDisabled}
-              fieldHidden={fieldHidden}
-              fieldRequired={fieldRequired}
-            />
-
-            {!fieldHidden.files && (
-              <FilesSection
-                id="portal-files"
-                bookingId={form.id}
-                files={data.files}
-                categoryStatuses={data.categoryStatuses}
-                onRefresh={loadPortal}
-                readOnly={readOnly || fieldDisabled.files}
-                isAdmin={false}
-                portalToken={token}
-              />
-            )}
-              </FormColumn>
+            {!fieldHidden.schedule && (
+              <CalendarSection id="portal-calendar" entries={data.schedule} />
+            )}  </FormColumn>
             </ContentLayout>
           </Main>
         </ScrollArea>

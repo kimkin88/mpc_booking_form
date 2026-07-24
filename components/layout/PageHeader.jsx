@@ -108,7 +108,7 @@ export const Section = styled.section`
   padding: ${({ theme }) => theme.space[5]};
   margin-bottom: ${({ theme }) => theme.space[5]};
   box-shadow: ${({ theme }) => theme.shadows.sm};
-  scroll-margin-top: calc(var(--portal-header-h, 3.5rem) + ${({ theme }) => theme.space[4]});
+  scroll-margin-top: calc(var(--portal-header-h, 4.5rem) + ${({ theme }) => theme.space[5]});
   transition: box-shadow ${({ theme }) => theme.transitions.base};
 
   @media (min-width: ${({ theme }) => theme.breakpoints.md}) {

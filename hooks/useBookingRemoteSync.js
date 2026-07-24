@@ -1,30 +1,30 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import { portalRequest } from '@/lib/apiClient';
-import { bookingSyncFingerprint, filesFingerprint } from '@/lib/syncFingerprints';
-
-export { filesFingerprint } from '@/lib/syncFingerprints';
+import { api } from '@/lib/apiClient';
+import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 
 /**
- * Polls the portal payload and applies remote updates when booking data changes.
- * While the client is editing/saving, soft-syncs related data without wiping form fields.
+ * Polls the full booking payload so admin sees portal (and other-tab) changes live.
  */
-export function usePortalRemoteSync({
-  token,
-  enabled = true,
-  intervalMs = 3000,
-  localFingerprint,
-  dirty = false,
-  saving = false,
-  onRemoteUpdate,
-}) {
+export function useBookingRemoteSync(
+  bookingId,
+  {
+    enabled = true,
+    intervalMs = 3000,
+    localFingerprint,
+    dirty = false,
+    saving = false,
+    onRemoteUpdate,
+  } = {}
+) {
   const inFlight = useRef(false);
   const dirtyRef = useRef(dirty);
   const savingRef = useRef(saving);
   const fingerprintRef = useRef(localFingerprint);
   const onRemoteUpdateRef = useRef(onRemoteUpdate);
   const lastToastAtRef = useRef(0);
+  const primed = useRef(false);
 
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -43,16 +43,12 @@ export function usePortalRemoteSync({
   }, [onRemoteUpdate]);
 
   const check = useCallback(async () => {
-    if (!token || inFlight.current) return;
+    if (!bookingId || inFlight.current) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
-    const known = fingerprintRef.current;
-    if (known == null) return;
-
-    const isBusy = dirtyRef.current || savingRef.current;
     inFlight.current = true;
     try {
-      const result = await portalRequest(`/api/portal/${token}`);
+      const result = await api.get(`/api/bookings/${bookingId}`);
       const remote = bookingSyncFingerprint({
         booking: result?.booking,
         files: result?.files,
@@ -63,43 +59,47 @@ export function usePortalRemoteSync({
         portal: result?.portal,
       });
 
+      if (!primed.current) {
+        fingerprintRef.current = remote;
+        primed.current = true;
+        return;
+      }
+
+      const known = fingerprintRef.current;
       if (remote === known) return;
 
-      const prevFiles = known.split('::')[1] || '';
-      const nextFiles = remote.split('::')[1] || '';
-      const filesChanged = prevFiles !== nextFiles;
-      const versionChanged =
-        String(result?.booking?.current_version ?? '') !== String(known.split('::')[0] || '');
-
+      const isBusy = dirtyRef.current || savingRef.current;
       const now = Date.now();
       const allowToast = now - lastToastAtRef.current > 8000;
 
       await onRemoteUpdateRef.current?.(result, {
         softSync: isBusy,
-        versionChanged,
-        filesChanged,
         allowToast,
+        remoteVersion: result?.booking?.current_version,
       });
 
-      // Always advance fingerprint after applying so we don't re-fire every poll
       fingerprintRef.current = remote;
       if (allowToast) lastToastAtRef.current = now;
     } catch {
-      // Keep last good snapshot
+      // keep last good
     } finally {
       inFlight.current = false;
     }
-  }, [token]);
+  }, [bookingId]);
 
   useEffect(() => {
-    if (!enabled || !token) return undefined;
+    primed.current = false;
+  }, [bookingId]);
+
+  useEffect(() => {
+    if (!enabled || !bookingId) return undefined;
 
     let cancelled = false;
     const run = () => {
       if (!cancelled) check();
     };
 
-    run(); // immediate tick
+    run();
     const timer = setInterval(run, intervalMs);
     const onVisible = () => {
       if (document.visibilityState === 'visible') run();
@@ -111,7 +111,9 @@ export function usePortalRemoteSync({
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [token, enabled, intervalMs, check]);
+  }, [bookingId, enabled, intervalMs, check]);
+
+  return { refresh: check };
 }
 
-export default usePortalRemoteSync;
+export default useBookingRemoteSync;

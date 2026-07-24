@@ -202,6 +202,7 @@ export async function updatePortalStatus(bookingId, updates, actor) {
   const allowed = {};
   if (updates.status != null) allowed.status = updates.status;
   if (updates.editing_locked != null) allowed.editing_locked = updates.editing_locked;
+  if (updates.manual_unlock != null) allowed.manual_unlock = !!updates.manual_unlock;
   if (Object.prototype.hasOwnProperty.call(updates, 'expires_at')) {
     allowed.expires_at = updates.expires_at;
   }
@@ -236,12 +237,66 @@ export async function updatePortalStatus(bookingId, updates, actor) {
     actorRole: 'admin',
     action,
     section: 'portal',
-    previousValue: { status: portal.status, editing_locked: portal.editing_locked },
+    previousValue: {
+      status: portal.status,
+      editing_locked: portal.editing_locked,
+      manual_unlock: portal.manual_unlock,
+    },
     newValue: allowed,
     source: 'admin_portal',
   });
 
   return data;
+}
+
+/**
+ * Admin unlock: clear hard locks, allow current booking status, and suppress auto-lock re-lock.
+ */
+export async function unlockPortalForEditing(bookingId, actor) {
+  const supabase = createServiceClient();
+  const portal = await getPortalByBooking(bookingId);
+  if (!portal) {
+    const err = new Error('Portal not found');
+    err.code = 'NO_PORTAL';
+    throw err;
+  }
+
+  const { data: booking } = await supabase
+    .from('bookings')
+    .select('id, status, auto_lock_enabled, portal_lock_date')
+    .eq('id', bookingId)
+    .single();
+
+  const statusMap = {
+    ...resolveStatusPortalEditable(portal),
+  };
+  if (booking?.status) statusMap[booking.status] = true;
+
+  const updated = await updatePortalStatus(
+    bookingId,
+    {
+      status: 'active',
+      editing_locked: false,
+      manual_unlock: true,
+      status_portal_editable: statusMap,
+    },
+    actor
+  );
+
+  // Prevent lazy/cron auto-lock from immediately undoing the unlock
+  if (booking && booking.auto_lock_enabled !== false) {
+    await supabase
+      .from('bookings')
+      .update({ auto_lock_enabled: false })
+      .eq('id', bookingId);
+  }
+
+  return {
+    portal: updated,
+    bookingStatus: booking?.status || null,
+    autoLockDisabled: true,
+    portalLockDate: booking?.portal_lock_date || null,
+  };
 }
 
 /**
@@ -278,7 +333,15 @@ export async function resolvePortalToken(rawToken) {
 
   if (bookingError) throw bookingError;
 
-  return { portal, booking, denied: null };
+  // Enforce scheduled auto-lock lazily when clients open the portal
+  try {
+    const { enforceAutoLockIfDue } = await import('@/services/autoLockService');
+    const lockedPortal = await enforceAutoLockIfDue(booking, portal);
+    return { portal: lockedPortal || portal, booking, denied: null };
+  } catch (err) {
+    console.error('Auto-lock enforcement failed:', err);
+    return { portal, booking, denied: null };
+  }
 }
 
 export async function authenticatePortal({ rawToken, pin, userAgent, ipAddress }) {
@@ -414,10 +477,13 @@ export async function validatePortalSession(sessionToken) {
 }
 
 export function resolveStatusPortalEditable(portal) {
-  return {
+  const raw = {
     ...DEFAULT_STATUS_PORTAL_EDITABLE,
     ...(portal?.status_portal_editable || {}),
   };
+  // Internal flags must not appear as booking-status toggles
+  delete raw.__manual_unlock;
+  return raw;
 }
 
 export function isPortalEditable(portal, bookingStatus) {
@@ -425,6 +491,10 @@ export function isPortalEditable(portal, bookingStatus) {
   if (portal.status === 'disabled' || portal.status === 'expired') return false;
   if (portal.status === 'locked') return false;
   if (portal.editing_locked) return false;
+
+  // Explicit admin unlock overrides soft status rules until locked again
+  if (portal.manual_unlock === true) return true;
+
   if (bookingStatus) {
     const map = resolveStatusPortalEditable(portal);
     if (map[bookingStatus] === false) return false;

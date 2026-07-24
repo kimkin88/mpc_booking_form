@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import styled, { keyframes } from 'styled-components';
@@ -10,11 +10,17 @@ import {
   DataRefreshProvider,
   DataRefreshButton,
 } from '@/contexts/DataRefreshContext';
+import { api } from '@/lib/apiClient';
 import { Button } from '@/components/ui/Button';
 import { ChangePasswordDialog } from '@/components/layout/ChangePasswordDialog';
 import { NotificationsBell } from '@/components/layout/NotificationsBell';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { ScrollArea } from '@/components/ui/ScrollArea';
+
+function formatTokens(n) {
+  const value = Number(n) || 0;
+  return value.toLocaleString();
+}
 
 const Shell = styled.div`
   height: 100dvh;
@@ -340,6 +346,13 @@ const CloseButton = styled.button`
   }
 `;
 
+const UsageHint = styled.p`
+  margin: ${({ theme }) => theme.space[2]} 0 0;
+  font-size: ${({ theme }) => theme.fontSizes.xs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  line-height: 1.4;
+`;
+
 const SettingsActions = styled.div`
   display: flex;
   flex-direction: column;
@@ -437,10 +450,45 @@ export function AdminShell({ children, wide = false }) {
   const { profile, user, signOut, loading } = useAuth();
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageResetting, setUsageResetting] = useState(false);
 
   const displayName = profile?.full_name || user?.name || user?.email || 'Admin';
   const username = user?.email || 'admin';
   const roleLabel = profile?.role === 'admin' || user?.role === 'admin' ? 'Admin' : 'User';
+
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+    let cancelled = false;
+    setUsageLoading(true);
+    api
+      .get('/api/admin/openai-usage')
+      .then((data) => {
+        if (!cancelled) setTokenUsage(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTokenUsage(null);
+      })
+      .finally(() => {
+        if (!cancelled) setUsageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsOpen]);
+
+  const handleResetUsage = async () => {
+    setUsageResetting(true);
+    try {
+      const data = await api.post('/api/admin/openai-usage', { action: 'reset' });
+      setTokenUsage(data);
+    } catch {
+      // keep previous counter on failure
+    } finally {
+      setUsageResetting(false);
+    }
+  };
 
   const handleSignOut = async () => {
     setSettingsOpen(false);
@@ -538,6 +586,60 @@ export function AdminShell({ children, wide = false }) {
                       <GroupLabel>Appearance</GroupLabel>
                       <SettingsActions>
                         <ThemeToggle />
+                      </SettingsActions>
+                    </SettingsGroup>
+
+                    <SettingsGroup>
+                      <GroupLabel>OpenAI usage</GroupLabel>
+                      <AccountCard>
+                        <AccountMeta>
+                          <MetaRow>
+                            <dt>Spent tokens</dt>
+                            <dd>
+                              {usageLoading
+                                ? '…'
+                                : formatTokens(tokenUsage?.totalTokens)}
+                            </dd>
+                          </MetaRow>
+                          <MetaRow>
+                            <dt>Prompt</dt>
+                            <dd>
+                              {usageLoading
+                                ? '…'
+                                : formatTokens(tokenUsage?.promptTokens)}
+                            </dd>
+                          </MetaRow>
+                          <MetaRow>
+                            <dt>Completion</dt>
+                            <dd>
+                              {usageLoading
+                                ? '…'
+                                : formatTokens(tokenUsage?.completionTokens)}
+                            </dd>
+                          </MetaRow>
+                          <MetaRow>
+                            <dt>Requests</dt>
+                            <dd>
+                              {usageLoading
+                                ? '…'
+                                : formatTokens(tokenUsage?.requestCount)}
+                            </dd>
+                          </MetaRow>
+                        </AccountMeta>
+                        <UsageHint>
+                          {tokenUsage?.openaiConfigured === false
+                            ? 'OpenAI is not configured. Token counts stay at zero until document AI parsing runs.'
+                            : 'Counts tokens from document AI parsing on this server.'}
+                        </UsageHint>
+                      </AccountCard>
+                      <SettingsActions>
+                        <Button
+                          variant="secondary"
+                          disabled={usageLoading || usageResetting || !tokenUsage?.totalTokens}
+                          onClick={handleResetUsage}
+                        >
+                          {usageResetting ? 'Resetting…' : 'Reset counter'}
+                        </Button>
                       </SettingsActions>
                     </SettingsGroup>
                   </SettingsBodyInner>

@@ -1,13 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { Switch } from '@/components/ui/Switch';
 import { Button } from '@/components/ui/Button';
-import { CURRENCIES, MAX_FILE_SIZE_MB } from '@/lib/constants';
+import { CURRENCIES, FORMAT_TYPES, MAX_FILE_SIZE_MB } from '@/lib/constants';
 import { Section, SectionTitle, SectionHint, Grid, Row, FieldAddon } from '@/components/layout/PageHeader';
+import {
+  hasBudgetCap,
+  ratesFromBooking,
+  remainingBudget,
+  shootRowsCost,
+} from '@/lib/rateCard';
+import { calculateDeliveryDate, effectiveDeliveryDate } from '@/lib/deliveryDate';
+import { calculateInCharge, calculatePortalLockDate } from '@/lib/inCharge';
+import { formatDate } from '@/utils/format';
 
 const EmailChip = styled.span`
   display: inline-flex;
@@ -41,6 +49,43 @@ const Muted = styled.p`
   color: ${({ theme }) => theme.colors.textMuted};
 `;
 
+const NestedFiles = styled.div`
+  margin-top: ${({ theme }) => theme.space[4]};
+`;
+
+const CalcPanel = styled.div`
+  margin-top: ${({ theme }) => theme.space[4]};
+  padding: ${({ theme }) => theme.space[3]} ${({ theme }) => theme.space[4]};
+  border-radius: ${({ theme }) => theme.radii.md};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => theme.colors.bgMuted};
+  display: grid;
+  gap: ${({ theme }) => theme.space[2]};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const CalcRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+
+  strong {
+    font-weight: 600;
+  }
+
+  span.meta {
+    color: ${({ theme }) => theme.colors.textMuted};
+  }
+`;
+
+const Warn = styled.p`
+  margin: 0.25rem 0 0;
+  color: ${({ theme }) => theme.colors.warning};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+`;
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function isShown(fieldHidden, key) {
@@ -51,189 +96,33 @@ function anyShown(fieldHidden, keys) {
   return keys.some((key) => isShown(fieldHidden, key));
 }
 
-export function ReferenceBudgetSection({
-  values,
-  onChange,
-  errors = {},
-  readOnly = false,
-  fieldDisabled = {},
-  fieldHidden = {},
-  fieldRequired = {},
-  id,
-}) {
-  if (!anyShown(fieldHidden, ['sb_number', 'currency', 'budget'])) return null;
-
-  return (
-    <Section id={id}>
-      <SectionTitle>Reference & Budget</SectionTitle>
-      <SectionHint>
-        SB Number is required and must be unique. Currency is selected from a list. Budget accepts
-        numeric values only and may be marked required by admin.
-      </SectionHint>
-      <Grid $cols={3}>
-        {isShown(fieldHidden, 'sb_number') && (
-          <Input
-            label="SB Number"
-            name="sb_number"
-            required
-            value={values.sb_number || ''}
-            onChange={(e) => onChange('sb_number', e.target.value)}
-            error={errors.sb_number}
-            disabled={readOnly || fieldDisabled.sb_number}
-          />
-        )}
-        {isShown(fieldHidden, 'currency') && (
-          <Select
-            label="Currency"
-            name="currency"
-            required={!!fieldRequired.currency}
-            value={values.currency || 'GBP'}
-            onValueChange={(v) => onChange('currency', v)}
-            options={CURRENCIES}
-            disabled={readOnly || fieldDisabled.currency}
-            error={errors.currency}
-          />
-        )}
-        {isShown(fieldHidden, 'budget') && (
-          <Input
-            label="Budget"
-            name="budget"
-            type="number"
-            step="0.01"
-            min="0"
-            required={!!values.budget_required || !!fieldRequired.budget}
-            value={values.budget ?? ''}
-            onChange={(e) => onChange('budget', e.target.value === '' ? null : e.target.value)}
-            error={errors.budget}
-            disabled={readOnly || fieldDisabled.budget}
-            hint={
-              values.budget_required || fieldRequired.budget
-                ? 'Required for this booking'
-                : 'Optional'
-            }
-          />
-        )}
-      </Grid>
-      {!readOnly && !fieldDisabled.budget_required && (
-        <div style={{ marginTop: '1rem' }}>
-          <Switch
-            id="budget_required"
-            label="Budget required"
-            checked={!!values.budget_required}
-            onCheckedChange={(v) => onChange('budget_required', v)}
-            description="When enabled, Budget must be completed before submission."
-          />
-        </div>
-      )}
-    </Section>
-  );
+function money(n, currency = 'GBP') {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  try {
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: currency || 'GBP',
+      maximumFractionDigits: 0,
+      useGrouping: false,
+    }).format(num);
+  } catch {
+    return String(num);
+  }
 }
 
-export function ClientCampaignSection({
+function CcEmailsField({
   values,
   onChange,
   errors = {},
   readOnly = false,
   fieldDisabled = {},
-  fieldHidden = {},
   fieldRequired = {},
-  id,
-}) {
-  const keys = [
-    'campaign_name',
-    'city_market',
-    'client_company',
-    'client_name',
-    'client_email',
-  ];
-  if (!anyShown(fieldHidden, keys)) return null;
-
-  return (
-    <Section id={id}>
-      <SectionTitle>Client & Campaign</SectionTitle>
-      <SectionHint>
-        Campaign Name and Client Company are searchable from the admin bookings list.
-      </SectionHint>
-      <Grid>
-        {isShown(fieldHidden, 'campaign_name') && (
-          <Input
-            label="Campaign Name"
-            name="campaign_name"
-            required={!!fieldRequired.campaign_name}
-            value={values.campaign_name || ''}
-            onChange={(e) => onChange('campaign_name', e.target.value)}
-            disabled={readOnly || fieldDisabled.campaign_name}
-            error={errors.campaign_name}
-          />
-        )}
-        {isShown(fieldHidden, 'city_market') && (
-          <Input
-            label="City / Market"
-            name="city_market"
-            required={!!fieldRequired.city_market}
-            value={values.city_market || ''}
-            onChange={(e) => onChange('city_market', e.target.value)}
-            disabled={readOnly || fieldDisabled.city_market}
-            error={errors.city_market}
-          />
-        )}
-        {isShown(fieldHidden, 'client_company') && (
-          <Input
-            label="Client Company"
-            name="client_company"
-            required={!!fieldRequired.client_company}
-            value={values.client_company || ''}
-            onChange={(e) => onChange('client_company', e.target.value)}
-            disabled={readOnly || fieldDisabled.client_company}
-            error={errors.client_company}
-          />
-        )}
-        {isShown(fieldHidden, 'client_name') && (
-          <Input
-            label="JCD Independent Client Name"
-            name="client_name"
-            required={!!fieldRequired.client_name}
-            value={values.client_name || ''}
-            onChange={(e) => onChange('client_name', e.target.value)}
-            disabled={readOnly || fieldDisabled.client_name}
-            error={errors.client_name}
-          />
-        )}
-        {isShown(fieldHidden, 'client_email') && (
-          <Input
-            label="JCD Independent Client Email"
-            name="client_email"
-            type="email"
-            required={!!fieldRequired.client_email}
-            value={values.client_email || ''}
-            onChange={(e) => onChange('client_email', e.target.value)}
-            error={errors.client_email}
-            disabled={readOnly || fieldDisabled.client_email}
-          />
-        )}
-      </Grid>
-    </Section>
-  );
-}
-
-export function JcdContactSection({
-  values,
-  onChange,
-  errors = {},
-  readOnly = false,
-  fieldDisabled = {},
-  fieldHidden = {},
-  fieldRequired = {},
-  id,
 }) {
   const [ccDraft, setCcDraft] = useState('');
   const [ccError, setCcError] = useState('');
   const emails = Array.isArray(values.cc_emails) ? values.cc_emails : [];
   const canEditCc = !readOnly && !fieldDisabled.cc_emails;
-
-  if (!anyShown(fieldHidden, ['jcd_contact_name', 'jcd_contact_email', 'cc_emails'])) {
-    return null;
-  }
 
   const addCc = () => {
     setCcError('');
@@ -259,12 +148,329 @@ export function JcdContactSection({
   };
 
   return (
+    <div>
+      <label
+        htmlFor="cc-email-input"
+        style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: 6 }}
+      >
+        Team Email / CC Emails{fieldRequired.cc_emails ? ' *' : ''}
+      </label>
+
+      {emails.length > 0 && (
+        <Row style={{ marginBottom: '0.75rem' }}>
+          {emails.map((email) => (
+            <EmailChip key={email}>
+              {email}
+              {canEditCc && (
+                <ChipRemove type="button" aria-label={`Remove ${email}`} onClick={() => removeCc(email)}>
+                  ×
+                </ChipRemove>
+              )}
+            </EmailChip>
+          ))}
+        </Row>
+      )}
+
+      {emails.length === 0 && <Muted>No team / CC recipients yet.</Muted>}
+
+      {canEditCc && (
+        <Row style={{ alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <Input
+              id="cc-email-input"
+              label=""
+              type="email"
+              value={ccDraft}
+              onChange={(e) => {
+                setCcDraft(e.target.value);
+                setCcError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addCc();
+                }
+              }}
+              placeholder="name@example.com"
+              error={ccError || errors.cc_emails}
+              hint="Press Enter or click Add"
+            />
+          </div>
+          <FieldAddon>
+            <Button type="button" variant="secondary" onClick={addCc}>
+              Add
+            </Button>
+          </FieldAddon>
+        </Row>
+      )}
+    </div>
+  );
+}
+
+/** Section 1 — Brand and commercial details */
+export function CampaignDetailsSection({
+  values,
+  onChange,
+  errors = {},
+  readOnly = false,
+  fieldDisabled = {},
+  fieldHidden = {},
+  fieldRequired = {},
+  scheduleEntries = [],
+  poFiles = null,
+  showRateCard = false,
+  showAdminOwnership = false,
+  id,
+}) {
+  const keys = ['brand', 'campaign_name', 'city_market', 'sb_number', 'budget', 'currency', 'po_number'];
+  if (!anyShown(fieldHidden, keys) && !poFiles && !showAdminOwnership) return null;
+
+  const rates = ratesFromBooking(values);
+  const budgetSet = hasBudgetCap(values.budget);
+  const spent = shootRowsCost(scheduleEntries, rates);
+  const remaining = remainingBudget(values.budget, scheduleEntries, rates);
+
+  return (
     <Section id={id}>
-      <SectionTitle>JCD Contact</SectionTitle>
-      <SectionHint>
-        Add or remove multiple CC email recipients. All email addresses are validated.
-      </SectionHint>
-      <Grid>
+      <SectionTitle>Brand and commercial details</SectionTitle>
+      <Grid $cols={2}>
+        {isShown(fieldHidden, 'brand') && (
+          <Input
+            label="Brand"
+            name="brand"
+            required={!!fieldRequired.brand}
+            value={values.brand || ''}
+            onChange={(e) => onChange('brand', e.target.value)}
+            disabled={readOnly || fieldDisabled.brand}
+            error={errors.brand}
+            placeholder="Nike"
+          />
+        )}
+        {isShown(fieldHidden, 'campaign_name') && (
+          <Input
+            label="Campaign"
+            name="campaign_name"
+            required={!!fieldRequired.campaign_name}
+            value={values.campaign_name || ''}
+            onChange={(e) => onChange('campaign_name', e.target.value)}
+            disabled={readOnly || fieldDisabled.campaign_name}
+            error={errors.campaign_name}
+          />
+        )}
+        {isShown(fieldHidden, 'city_market') && (
+          <Input
+            label="City / Market"
+            name="city_market"
+            required={!!fieldRequired.city_market}
+            value={values.city_market || ''}
+            onChange={(e) => onChange('city_market', e.target.value)}
+            disabled={readOnly || fieldDisabled.city_market}
+            error={errors.city_market}
+            placeholder="London"
+          />
+        )}
+        {isShown(fieldHidden, 'sb_number') && (
+          <Input
+            label="Reference Number"
+            name="sb_number"
+            required
+            value={values.sb_number || ''}
+            onChange={(e) => onChange('sb_number', e.target.value)}
+            error={errors.sb_number}
+            disabled={readOnly || fieldDisabled.sb_number}
+            placeholder="CAM-00123"
+          />
+        )}
+        {isShown(fieldHidden, 'po_number') && (
+          <Input
+            label="PO Number"
+            name="po_number"
+            required={!!fieldRequired.po_number}
+            value={values.po_number || ''}
+            onChange={(e) => onChange('po_number', e.target.value)}
+            error={errors.po_number}
+            disabled={readOnly || fieldDisabled.po_number}
+            placeholder="PO-12345"
+          />
+        )}
+      </Grid>
+      <Grid $cols={2} style={{ marginTop: '1rem' }}>
+        {isShown(fieldHidden, 'budget') && (
+          <Input
+            label="Budget"
+            name="budget"
+            type="number"
+            step="0.01"
+            min="0"
+            required={!!values.budget_required || !!fieldRequired.budget}
+            value={values.budget ?? ''}
+            onChange={(e) => onChange('budget', e.target.value === '' ? null : e.target.value)}
+            error={errors.budget}
+            disabled={readOnly || fieldDisabled.budget}
+            placeholder="1680"
+          />
+        )}
+        {isShown(fieldHidden, 'currency') && (
+          <Select
+            label="Currency"
+            name="currency"
+            required={!!fieldRequired.currency}
+            value={values.currency || 'GBP'}
+            onValueChange={(v) => onChange('currency', v)}
+            options={CURRENCIES}
+            disabled={readOnly || fieldDisabled.currency}
+            error={errors.currency}
+          />
+        )}
+      </Grid>
+
+      {isShown(fieldHidden, 'budget') && (
+        <CalcPanel>
+          <CalcRow>
+            <span>
+              Rate card: <strong>{rates.label}</strong>
+            </span>
+            <span className="meta">
+              1 day {money(rates.fullDay, values.currency)} · 0.5 day{' '}
+              {money(rates.halfDay, values.currency)}
+            </span>
+          </CalcRow>
+          <CalcRow>
+            <span>
+              Shoot cost allocated: <strong>{money(spent, values.currency)}</strong>
+            </span>
+            <span>
+              Remaining shoot budget:{' '}
+              <strong>{budgetSet ? money(remaining, values.currency) : 'Not set'}</strong>
+              {budgetSet && remaining < 0 ? ' — over budget' : ''}
+            </span>
+          </CalcRow>
+        </CalcPanel>
+      )}
+
+      {showRateCard && (
+        <Grid $cols={3} style={{ marginTop: '1rem' }}>
+          <Input
+            label="Rate card label"
+            name="rate_card_label"
+            value={values.rate_card_label || 'JCD Rates'}
+            onChange={(e) => onChange('rate_card_label', e.target.value)}
+            disabled={readOnly}
+            hint="Configurable per client"
+          />
+          <Input
+            label="0.5 day rate"
+            name="half_day_rate"
+            type="number"
+            step="0.01"
+            min="0"
+            value={values.half_day_rate ?? 640}
+            onChange={(e) => onChange('half_day_rate', e.target.value === '' ? null : e.target.value)}
+            disabled={readOnly}
+          />
+          <Input
+            label="1 day rate"
+            name="full_day_rate"
+            type="number"
+            step="0.01"
+            min="0"
+            value={values.full_day_rate ?? 1040}
+            onChange={(e) => onChange('full_day_rate', e.target.value === '' ? null : e.target.value)}
+            disabled={readOnly}
+          />
+        </Grid>
+      )}
+
+      {showAdminOwnership && (
+        <Grid $cols={2} style={{ marginTop: '1rem' }}>
+          <Input
+            label="MPC Booking Owner"
+            name="mpc_owner_name"
+            value={values.mpc_owner_name || ''}
+            onChange={(e) => onChange('mpc_owner_name', e.target.value)}
+            disabled={readOnly}
+          />
+          <Input
+            label="MPC Backup Owner"
+            name="mpc_backup_owner_name"
+            value={values.mpc_backup_owner_name || ''}
+            onChange={(e) => onChange('mpc_backup_owner_name', e.target.value)}
+            disabled={readOnly}
+          />
+        </Grid>
+      )}
+
+      {poFiles && <NestedFiles>{poFiles}</NestedFiles>}
+    </Section>
+  );
+}
+
+/** Section 2 — Client and JCD contacts */
+export function ContactInformationSection({
+  values,
+  onChange,
+  errors = {},
+  readOnly = false,
+  fieldDisabled = {},
+  fieldHidden = {},
+  fieldRequired = {},
+  id,
+}) {
+  const keys = [
+    'client_name',
+    'client_email',
+    'cc_emails',
+    'jcd_contact_name',
+    'jcd_contact_email',
+  ];
+  if (!anyShown(fieldHidden, keys)) return null;
+
+  const nameRequired = fieldRequired.client_name !== false;
+  const emailRequired = fieldRequired.client_email !== false;
+
+  return (
+    <Section id={id}>
+      <SectionTitle>Client and JCD contacts</SectionTitle>
+      <Grid $cols={2}>
+        {isShown(fieldHidden, 'client_name') && (
+          <Input
+            label="Name"
+            name="client_name"
+            required={nameRequired || !!fieldRequired.client_name}
+            value={values.client_name || ''}
+            onChange={(e) => onChange('client_name', e.target.value)}
+            disabled={readOnly || fieldDisabled.client_name}
+            error={errors.client_name}
+          />
+        )}
+        {isShown(fieldHidden, 'client_email') && (
+          <Input
+            label="Email"
+            name="client_email"
+            type="email"
+            required={emailRequired || !!fieldRequired.client_email}
+            value={values.client_email || ''}
+            onChange={(e) => onChange('client_email', e.target.value)}
+            error={errors.client_email}
+            disabled={readOnly || fieldDisabled.client_email}
+          />
+        )}
+      </Grid>
+
+      {isShown(fieldHidden, 'cc_emails') && (
+        <div style={{ marginTop: '1.25rem' }}>
+          <CcEmailsField
+            values={values}
+            onChange={onChange}
+            errors={errors}
+            readOnly={readOnly}
+            fieldDisabled={fieldDisabled}
+            fieldRequired={fieldRequired}
+          />
+        </div>
+      )}
+
+      <Grid $cols={2} style={{ marginTop: '1.25rem' }}>
         {isShown(fieldHidden, 'jcd_contact_name') && (
           <Input
             label="JCD Contact Name"
@@ -289,74 +495,12 @@ export function JcdContactSection({
           />
         )}
       </Grid>
-
-      {isShown(fieldHidden, 'cc_emails') && (
-        <div style={{ marginTop: '1.25rem' }}>
-          <label
-            htmlFor="cc-email-input"
-            style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: 6 }}
-          >
-            CC Email{fieldRequired.cc_emails ? ' *' : ''}
-          </label>
-
-          {emails.length > 0 && (
-            <Row style={{ marginBottom: '0.75rem' }}>
-              {emails.map((email) => (
-                <EmailChip key={email}>
-                  {email}
-                  {canEditCc && (
-                    <ChipRemove
-                      type="button"
-                      aria-label={`Remove ${email}`}
-                      onClick={() => removeCc(email)}
-                    >
-                      ×
-                    </ChipRemove>
-                  )}
-                </EmailChip>
-              ))}
-            </Row>
-          )}
-
-          {emails.length === 0 && <Muted>No CC recipients yet.</Muted>}
-
-          {canEditCc && (
-            <Row style={{ alignItems: 'flex-start' }}>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <Input
-                  id="cc-email-input"
-                  label=""
-                  type="email"
-                  value={ccDraft}
-                  onChange={(e) => {
-                    setCcDraft(e.target.value);
-                    setCcError('');
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addCc();
-                    }
-                  }}
-                  placeholder="name@example.com"
-                  error={ccError || errors.cc_emails}
-                  hint="Press Enter or click Add recipient"
-                />
-              </div>
-              <FieldAddon>
-                <Button type="button" variant="secondary" onClick={addCc}>
-                  Add recipient
-                </Button>
-              </FieldAddon>
-            </Row>
-          )}
-        </div>
-      )}
     </Section>
   );
 }
 
-export function InvoiceSection({
+/** Section 4 — Format, campaign dates, files, notes + calculated delivery / in-charge */
+export function DeliverablesSection({
   values,
   onChange,
   errors = {},
@@ -364,142 +508,187 @@ export function InvoiceSection({
   fieldDisabled = {},
   fieldHidden = {},
   fieldRequired = {},
-  allowPoOverride = true,
+  filesSlot = null,
+  showAdminOverride = false,
   id,
 }) {
-  const keys = [
-    'po_required',
-    'po_received',
-    'po_number',
-    'payment_terms',
-    'billing_address',
-    'invoice_notes',
-  ];
-  if (!anyShown(fieldHidden, keys)) return null;
+  const keys = ['format_type', 'campaign_start', 'campaign_end', 'client_notes', 'files'];
+  if (!anyShown(fieldHidden, keys) && !filesSlot) return null;
 
-  const handlePoRequired = (enabled) => {
-    onChange('po_required', enabled);
-    if (!enabled && values.po_received) {
-      onChange('po_received', false);
-    }
-  };
+  const formatType = values.format_type || '';
+  const isKnownFormat = FORMAT_TYPES.some((f) => f.value === formatType);
+  const isOther = formatType === 'Other' || (formatType && !isKnownFormat);
 
-  const handlePoReceived = (enabled) => {
-    if (enabled && !values.po_required && !allowPoOverride) return;
-    onChange('po_received', enabled);
-  };
+  const delivery = useMemo(
+    () => calculateDeliveryDate(formatType, values.campaign_start),
+    [formatType, values.campaign_start]
+  );
+  const effective = useMemo(() => effectiveDeliveryDate(values), [values]);
+  const inCharge = useMemo(
+    () => calculateInCharge(values.campaign_start),
+    [values.campaign_start]
+  );
+  const lockInfo = useMemo(
+    () => calculatePortalLockDate(values.campaign_start),
+    [values.campaign_start]
+  );
+
+  const formatRequired = fieldRequired.format_type !== false;
+  const startRequired = fieldRequired.campaign_start !== false;
+  const endRequired = fieldRequired.campaign_end !== false;
 
   return (
     <Section id={id}>
-      <SectionTitle>Invoice & Purchase Order</SectionTitle>
-      <SectionHint>
-        If PO Required is enabled, PO Number is required before the booking can be marked complete.
-        Attach purchase order or invoice files in Files & Assets (max {MAX_FILE_SIZE_MB}MB per
-        file).
-      </SectionHint>
-      <Grid>
-        {isShown(fieldHidden, 'po_required') && (
-          <Switch
-            id="po_required"
-            label="PO Required"
-            checked={!!values.po_required}
-            onCheckedChange={handlePoRequired}
-            disabled={readOnly || fieldDisabled.po_required}
+      <SectionTitle>Format, campaign dates, files and notes</SectionTitle>
+      <Grid $cols={2}>
+        {isShown(fieldHidden, 'format_type') && (
+          <Select
+            label="Format Type"
+            name="format_type"
+            required={formatRequired || !!fieldRequired.format_type}
+            value={isKnownFormat ? formatType : formatType ? 'Other' : ''}
+            onValueChange={(v) => {
+              if (v === 'Other') {
+                onChange('format_type', 'Other');
+                if (!values.format_type_other) onChange('format_type_other', '');
+              } else {
+                onChange('format_type', v);
+                onChange('format_type_other', null);
+              }
+            }}
+            options={FORMAT_TYPES}
+            disabled={readOnly || fieldDisabled.format_type}
+            error={errors.format_type}
+            placeholder="Select format"
           />
         )}
-        {isShown(fieldHidden, 'po_received') && (
-          <Switch
-            id="po_received"
-            label="PO Received"
-            checked={!!values.po_received}
-            onCheckedChange={handlePoReceived}
-            disabled={
-              readOnly ||
-              fieldDisabled.po_received ||
-              (!values.po_required && !allowPoOverride)
-            }
-            description={
-              !values.po_required && !allowPoOverride
-                ? 'Enable PO Required first'
-                : allowPoOverride && !values.po_required
-                  ? 'Admin override allowed when PO Required is off'
-                  : undefined
-            }
-          />
-        )}
-        {isShown(fieldHidden, 'po_number') && (
+        {isShown(fieldHidden, 'format_type') && isOther && (
           <Input
-            label="PO Number"
-            name="po_number"
-            required={!!values.po_required || !!fieldRequired.po_number}
-            value={values.po_number || ''}
-            onChange={(e) => onChange('po_number', e.target.value)}
-            error={errors.po_number}
-            disabled={readOnly || fieldDisabled.po_number}
-            hint={values.po_required ? 'Required when PO Required is enabled' : undefined}
-          />
-        )}
-        {isShown(fieldHidden, 'payment_terms') && (
-          <Input
-            label="Payment Terms"
-            name="payment_terms"
-            required={!!fieldRequired.payment_terms}
-            value={values.payment_terms || ''}
-            onChange={(e) => onChange('payment_terms', e.target.value)}
-            disabled={readOnly || fieldDisabled.payment_terms}
-            error={errors.payment_terms}
-          />
-        )}
-        {isShown(fieldHidden, 'billing_address') && (
-          <Textarea
-            label="Billing Address"
-            name="billing_address"
-            required={!!fieldRequired.billing_address}
-            value={values.billing_address || ''}
-            onChange={(e) => onChange('billing_address', e.target.value)}
-            disabled={readOnly || fieldDisabled.billing_address}
-            error={errors.billing_address}
-          />
-        )}
-        {isShown(fieldHidden, 'invoice_notes') && (
-          <Textarea
-            label="Miscellaneous Invoice Notes"
-            name="invoice_notes"
-            required={!!fieldRequired.invoice_notes}
-            value={values.invoice_notes || ''}
-            onChange={(e) => onChange('invoice_notes', e.target.value)}
-            disabled={readOnly || fieldDisabled.invoice_notes}
-            error={errors.invoice_notes}
+            label="If other, please specify"
+            name="format_type_other"
+            required
+            value={values.format_type_other || (formatType !== 'Other' ? formatType : '')}
+            onChange={(e) => {
+              onChange('format_type_other', e.target.value);
+              onChange('format_type', 'Other');
+            }}
+            disabled={readOnly || fieldDisabled.format_type}
+            error={errors.format_type_other}
+            placeholder="Describe format"
+            hint="Required for Other — delivery date stays TBC until MPC confirms"
           />
         )}
       </Grid>
-    </Section>
-  );
-}
 
-export function ClientNotesSection({
-  values,
-  onChange,
-  readOnly = false,
-  fieldDisabled = {},
-  fieldHidden = {},
-  fieldRequired = {},
-  id,
-}) {
-  if (!isShown(fieldHidden, 'client_notes')) return null;
+      {(isShown(fieldHidden, 'campaign_start') || isShown(fieldHidden, 'campaign_end')) && (
+        <Grid $cols={2} style={{ marginTop: '1rem' }}>
+          {isShown(fieldHidden, 'campaign_start') && (
+            <Input
+              label="Campaign Start Date"
+              name="campaign_start"
+              type="date"
+              required={startRequired || !!fieldRequired.campaign_start}
+              value={values.campaign_start || ''}
+              onChange={(e) => onChange('campaign_start', e.target.value || null)}
+              disabled={readOnly || fieldDisabled.campaign_start}
+              error={errors.campaign_start}
+            />
+          )}
+          {isShown(fieldHidden, 'campaign_end') && (
+            <Input
+              label="Campaign End Date"
+              name="campaign_end"
+              type="date"
+              required={endRequired || !!fieldRequired.campaign_end}
+              value={values.campaign_end || ''}
+              onChange={(e) => onChange('campaign_end', e.target.value || null)}
+              disabled={readOnly || fieldDisabled.campaign_end}
+              error={errors.campaign_end}
+            />
+          )}
+        </Grid>
+      )}
 
-  return (
-    <Section id={id}>
-      <SectionTitle>Client Notes</SectionTitle>
-      <SectionHint>Client-facing notes and comments where permitted.</SectionHint>
-      <Textarea
-        label="Client Notes"
-        name="client_notes"
-        required={!!fieldRequired.client_notes}
-        value={values.client_notes || ''}
-        onChange={(e) => onChange('client_notes', e.target.value)}
-        disabled={readOnly || fieldDisabled.client_notes}
-      />
+      <CalcPanel>
+        <CalcRow>
+          <span>
+            Delivery due date:{' '}
+            <strong>
+              {effective.status === 'override'
+                ? formatDate(effective.date)
+                : delivery.status === 'calculated'
+                  ? formatDate(delivery.date)
+                  : delivery.status === 'tbc'
+                    ? 'TBC'
+                    : '—'}
+            </strong>
+          </span>
+          <span className="meta">{effective.status === 'override' ? effective.label : delivery.label}</span>
+        </CalcRow>
+        <CalcRow>
+          <span>
+            In-Charge Reference:{' '}
+            <strong>{inCharge.reference || values.in_charge_reference || '—'}</strong>
+          </span>
+          {inCharge.periodStart && (
+            <span className="meta">
+              {formatDate(inCharge.periodStart)} → {formatDate(inCharge.periodEnd)}
+            </span>
+          )}
+        </CalcRow>
+        <CalcRow>
+          <span>
+            Portal lock date:{' '}
+            <strong>
+              {lockInfo.lockDate
+                ? formatDate(lockInfo.lockDate)
+                : values.portal_lock_date
+                  ? formatDate(values.portal_lock_date)
+                  : '—'}
+            </strong>
+          </span>
+          <span className="meta">7 days before in-charge period start</span>
+        </CalcRow>
+        {inCharge.warning && <Warn>{inCharge.warning}</Warn>}
+      </CalcPanel>
+
+      {showAdminOverride && (
+        <Grid $cols={2} style={{ marginTop: '1rem' }}>
+          <Input
+            label="Delivery date override"
+            name="delivery_date_override"
+            type="date"
+            value={values.delivery_date_override || ''}
+            onChange={(e) => onChange('delivery_date_override', e.target.value || null)}
+            disabled={readOnly}
+            hint="Optional admin override — leave blank to use calculated date"
+          />
+        </Grid>
+      )}
+
+      {filesSlot && (
+        <NestedFiles>
+          <SectionHint style={{ marginBottom: '0.75rem' }}>
+            Media Plan, Site Lists, and Creatives — multiple files per category (max{' '}
+            {MAX_FILE_SIZE_MB}MB each).
+          </SectionHint>
+          {filesSlot}
+        </NestedFiles>
+      )}
+
+      {isShown(fieldHidden, 'client_notes') && (
+        <div style={{ marginTop: '1.25rem' }}>
+          <Textarea
+            label="Additional Notes"
+            name="client_notes"
+            required={!!fieldRequired.client_notes}
+            value={values.client_notes || ''}
+            onChange={(e) => onChange('client_notes', e.target.value)}
+            disabled={readOnly || fieldDisabled.client_notes}
+            placeholder="Any extra context for the booking"
+          />
+        </div>
+      )}
     </Section>
   );
 }
@@ -522,32 +711,24 @@ export function InternalNotesSection({ values, onChange, readOnly = false }) {
   );
 }
 
-/** @deprecated Prefer ClientNotesSection / InternalNotesSection */
-export function NotesSection({
-  values,
-  onChange,
-  showInternal = true,
-  showClient = true,
-  readOnly = false,
-  fieldDisabled = {},
-  fieldHidden = {},
-  fieldRequired = {},
-}) {
-  return (
-    <>
-      {showClient && (
-        <ClientNotesSection
-          values={values}
-          onChange={onChange}
-          readOnly={readOnly}
-          fieldDisabled={fieldDisabled}
-          fieldHidden={fieldHidden}
-          fieldRequired={fieldRequired}
-        />
-      )}
-      {showInternal && (
-        <InternalNotesSection values={values} onChange={onChange} readOnly={readOnly} />
-      )}
-    </>
-  );
+/* —— Back-compat aliases —— */
+export function ReferenceBudgetSection(props) {
+  return <CampaignDetailsSection {...props} />;
+}
+export function ClientCampaignSection(props) {
+  return <CampaignDetailsSection {...props} />;
+}
+export function JcdContactSection(props) {
+  return <ContactInformationSection {...props} />;
+}
+export function ClientNotesSection(props) {
+  return <DeliverablesSection {...props} />;
+}
+export function InvoiceSection() {
+  return null;
+}
+export function NotesSection({ values, onChange, showInternal = true, readOnly = false }) {
+  return showInternal ? (
+    <InternalNotesSection values={values} onChange={onChange} readOnly={readOnly} />
+  ) : null;
 }

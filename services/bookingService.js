@@ -4,6 +4,8 @@ import { logActivity, logFieldChanges } from '@/services/activityService';
 import { bumpVersionAndSnapshot, createBookingSnapshot } from '@/services/versionService';
 import { notifyClient } from '@/services/notificationService';
 import { diffObjects } from '@/utils/helpers';
+import { calculateDeliveryDate } from '@/lib/deliveryDate';
+import { calculatePortalLockDate } from '@/lib/inCharge';
 
 function statusLabel(value) {
   return BOOKING_STATUSES.find((s) => s.value === value)?.label || value;
@@ -14,6 +16,7 @@ const TRACKED_FIELDS = [
   'currency',
   'budget',
   'budget_required',
+  'brand',
   'campaign_name',
   'city_market',
   'client_company',
@@ -22,6 +25,22 @@ const TRACKED_FIELDS = [
   'jcd_contact_name',
   'jcd_contact_email',
   'cc_emails',
+  'format_type',
+  'format_type_other',
+  'campaign_start',
+  'campaign_end',
+  'calculated_delivery_date',
+  'delivery_date_override',
+  'in_charge_reference',
+  'in_charge_period_start',
+  'in_charge_period_end',
+  'portal_lock_date',
+  'auto_lock_enabled',
+  'half_day_rate',
+  'full_day_rate',
+  'rate_card_label',
+  'mpc_owner_name',
+  'mpc_backup_owner_name',
   'mpc_chooses_sites',
   'po_required',
   'po_received',
@@ -57,7 +76,7 @@ export async function listBookings({
   if (status) query = query.eq('status', status);
   if (search) {
     query = query.or(
-      `sb_number.ilike.%${search}%,campaign_name.ilike.%${search}%,client_company.ilike.%${search}%`
+      `sb_number.ilike.%${search}%,campaign_name.ilike.%${search}%,client_company.ilike.%${search}%,brand.ilike.%${search}%`
     );
   }
 
@@ -162,9 +181,13 @@ export async function createBooking(payload, actor) {
     sb_number: sbNumber,
     currency: payload.currency || 'GBP',
     budget: payload.budget != null && payload.budget !== '' ? Number(payload.budget) : null,
+    brand: payload.brand || null,
     campaign_name: payload.campaign_name || null,
     client_company: payload.client_company || null,
     city_market: payload.city_market || null,
+    half_day_rate: payload.half_day_rate != null ? Number(payload.half_day_rate) : 640,
+    full_day_rate: payload.full_day_rate != null ? Number(payload.full_day_rate) : 1040,
+    rate_card_label: payload.rate_card_label || 'JCD Rates',
     mpc_chooses_sites: true,
     status: 'draft',
     current_version: 1,
@@ -254,6 +277,39 @@ export async function updateBooking(bookingId, payload, actor, options = {}) {
 
   if (Object.prototype.hasOwnProperty.call(updates, 'budget') && updates.budget !== null && updates.budget !== '') {
     updates.budget = Number(updates.budget);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(updates, 'half_day_rate') &&
+    updates.half_day_rate !== null &&
+    updates.half_day_rate !== ''
+  ) {
+    updates.half_day_rate = Number(updates.half_day_rate);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(updates, 'full_day_rate') &&
+    updates.full_day_rate !== null &&
+    updates.full_day_rate !== ''
+  ) {
+    updates.full_day_rate = Number(updates.full_day_rate);
+  }
+
+  // Recalculate derived schedule fields when format or campaign start changes
+  // (or when clearing override / forcing refresh via those fields).
+  const merged = { ...current, ...updates };
+  const formatOrStartChanged =
+    Object.prototype.hasOwnProperty.call(updates, 'format_type') ||
+    Object.prototype.hasOwnProperty.call(updates, 'campaign_start') ||
+    Object.prototype.hasOwnProperty.call(updates, 'format_type_other');
+
+  if (formatOrStartChanged || !current.in_charge_reference || !current.portal_lock_date) {
+    const delivery = calculateDeliveryDate(merged.format_type, merged.campaign_start);
+    updates.calculated_delivery_date = delivery.status === 'calculated' ? delivery.date : null;
+
+    const lock = calculatePortalLockDate(merged.campaign_start);
+    updates.in_charge_reference = lock.reference;
+    updates.in_charge_period_start = lock.periodStart;
+    updates.in_charge_period_end = lock.periodEnd;
+    updates.portal_lock_date = lock.lockDate;
   }
 
   if (Object.keys(updates).length === 0) {

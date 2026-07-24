@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import styled from 'styled-components';
@@ -14,23 +14,30 @@ import { useToast } from '@/components/ui/Toast';
 import { Modal } from '@/components/ui/Dialog';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import {
-  ReferenceBudgetSection,
-  ClientCampaignSection,
-  JcdContactSection,
-  InvoiceSection,
-  ClientNotesSection,
+  CampaignDetailsSection,
+  ContactInformationSection,
+  DeliverablesSection,
   InternalNotesSection,
 } from '@/components/booking/FormSections';
-import { ScheduleSection, SitesSection } from '@/components/booking/ScheduleSites';
+import { ShootRequirementsSection } from '@/components/booking/ShootRequirements';
+import { CalendarSection, SitesSection } from '@/components/booking/ScheduleSites';
+import { DocumentImportDialog } from '@/components/booking/DocumentImport';
 import { FilesSection } from '@/components/files/FilesSection';
 import { PortalControls, PermissionsPanel } from '@/components/booking/PortalPermissions';
 import { ActivityLogPanel, VersionsPanel } from '@/components/activity/ActivityVersions';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { api } from '@/lib/apiClient';
-import { BOOKING_STATUSES } from '@/lib/constants';
+import {
+  BOOKING_STATUSES,
+  DELIVERABLE_FILE_CATEGORIES,
+  MAX_FILE_SIZE_MB,
+  PO_FILE_CATEGORIES,
+} from '@/lib/constants';
 import { permissionsArrayToMap } from '@/lib/permissions';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { useRecentClientUpdates } from '@/hooks/useRecentClientUpdates';
+import { useBookingRemoteSync } from '@/hooks/useBookingRemoteSync';
+import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 import { formatDateTime } from '@/utils/format';
 
@@ -65,6 +72,24 @@ const SavedStatus = styled.span`
   font-size: ${({ theme }) => theme.fontSizes.sm};
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
   color: ${({ theme }) => theme.colors.success};
+`;
+
+const RemoteBanner = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: ${({ theme }) => theme.space[3]};
+  margin-bottom: ${({ theme }) => theme.space[4]};
+  padding: ${({ theme }) => theme.space[3]} ${({ theme }) => theme.space[4]};
+  border-radius: ${({ theme }) => theme.radii.md};
+  border: 1px solid ${({ theme }) => theme.colors.warning};
+  background: ${({ theme }) => theme.colors.warningMuted};
+  color: ${({ theme }) => theme.colors.text};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+
+  strong {
+    font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  }
 `;
 
 function LinkIcon() {
@@ -292,6 +317,57 @@ const VerticalTabsTrigger = styled(TabsTrigger)`
   }
 `;
 
+const DetailNavList = styled.ul`
+  list-style: none;
+  margin: ${({ theme }) => theme.space[3]} 0 0;
+  padding: ${({ theme }) => theme.space[2]} 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+
+  @media (max-width: 1023px) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+`;
+
+const DetailNavBtn = styled.button`
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: ${({ theme, $active }) => ($active ? theme.colors.primaryMuted : 'transparent')};
+  color: ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.textMuted)};
+  font-size: ${({ theme }) => theme.fontSizes.xs};
+  font-weight: ${({ theme, $active }) =>
+    $active ? theme.fontWeights.semibold : theme.fontWeights.medium};
+  padding: 0.35rem 0.65rem;
+  border-radius: ${({ theme }) => theme.radii.sm};
+  cursor: pointer;
+  transition:
+    background ${({ theme }) => theme.transitions.fast},
+    color ${({ theme }) => theme.transitions.fast};
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+    background: ${({ theme }) => theme.colors.bgMuted};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px ${({ theme }) => theme.colors.primaryMuted};
+  }
+
+  @media (max-width: 1023px) {
+    width: auto;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme, $active }) =>
+      $active ? theme.colors.primaryMuted : theme.colors.bgMuted};
+  }
+`;
+
 const MainColumn = styled.div`
   min-width: 0;
 `;
@@ -342,10 +418,17 @@ const MobileUpdates = styled.div`
 
 const TAB_ITEMS = [
   { value: 'details', label: 'Details' },
-  { value: 'schedule', label: 'Schedule & Sites' },
-  { value: 'files', label: 'Files' },
+  { value: 'calendar', label: 'Calendar' },
   { value: 'portal', label: 'Portal & Permissions' },
   { value: 'history', label: 'Activity & Versions' },
+];
+
+const DETAIL_SECTIONS = [
+  { id: 'admin-campaign', label: 'Brand & commercial' },
+  { id: 'admin-contact', label: 'Contacts' },
+  { id: 'admin-schedule', label: 'Shoot requirements' },
+  { id: 'admin-deliverables', label: 'Format & files' },
+  { id: 'admin-internal-notes', label: 'Internal notes' },
 ];
 
 function BookingSkeleton() {
@@ -380,34 +463,67 @@ export default function BookingDetailPage() {
   const [errors, setErrors] = useState({});
   const [tab, setTab] = useState('details');
   const [updatesRole, setUpdatesRole] = useState('client');
+  const [remoteAhead, setRemoteAhead] = useState(false);
+  const [activeDetailSection, setActiveDetailSection] = useState(DETAIL_SECTIONS[0].id);
+  const [importOpen, setImportOpen] = useState(false);
+
+  const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
 
   useUnsavedChanges(dirty);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
 
   const load = useCallback(async () => {
     const result = await api.get(`/api/bookings/${id}`);
     setData(result);
     setForm({ ...result.booking });
     setDirty(false);
+    setRemoteAhead(false);
     return result;
   }, [id]);
+
+  const applyRemoteBooking = useCallback(
+    (result, meta = {}) => {
+      setData(result);
+      setForm((prev) => {
+        if (!prev) return { ...result.booking };
+        if (dirtyRef.current) {
+          // Keep local field edits; sync status + version awareness only
+          setRemoteAhead(
+            Number(result.booking?.current_version) > Number(prev.current_version || 0)
+          );
+          return {
+            ...prev,
+            status: result.booking.status,
+            // Keep form.current_version as the base we last loaded/edited
+            // so save conflicts correctly instead of silently overwriting.
+          };
+        }
+        setRemoteAhead(false);
+        return { ...result.booking };
+      });
+      if (meta.allowToast) {
+        toast(dirtyRef.current ? 'Portal updated — load latest before saving' : 'Booking updated');
+      }
+    },
+    [toast]
+  );
 
   const onClientActivity = useCallback(async () => {
     try {
       const result = await api.get(`/api/bookings/${id}`);
-      setData(result);
-      setForm((prev) => {
-        if (!prev) return { ...result.booking };
-        if (dirty) {
-          // Keep in-progress edits; still sync booking status from the client.
-          return { ...prev, status: result.booking.status };
-        }
-        return { ...result.booking };
-      });
-      toast('Booking updated from portal');
+      applyRemoteBooking(result, { allowToast: true });
     } catch {
-      // Keep last good snapshot; activity poll already swallowed its own errors.
+      // Keep last good snapshot
     }
-  }, [id, dirty, toast]);
+  }, [id, applyRemoteBooking]);
 
   const {
     items: recentUpdates,
@@ -417,6 +533,31 @@ export default function BookingDetailPage() {
     enabled: !loading,
     role: updatesRole,
     onClientActivity,
+  });
+
+  const localFingerprint = useMemo(
+    () =>
+      data
+        ? bookingSyncFingerprint({
+            booking: data.booking,
+            files: data.files,
+            categoryStatuses: data.categoryStatuses,
+            schedule: data.schedule,
+            sites: data.sites,
+            permissions: data.permissions,
+            portal: data.portal,
+          })
+        : null,
+    [data]
+  );
+
+  useBookingRemoteSync(id, {
+    enabled: !loading && !!data,
+    intervalMs: 3000,
+    localFingerprint,
+    dirty,
+    saving,
+    onRemoteUpdate: applyRemoteBooking,
   });
 
   useEffect(() => {
@@ -475,7 +616,7 @@ export default function BookingDetailPage() {
 
       const payload = {
         ...form,
-        expected_version: overrideConflict ? undefined : data.booking.current_version,
+        expected_version: overrideConflict ? undefined : form.current_version,
         allow_po_override: true,
       };
       delete payload.id;
@@ -507,6 +648,52 @@ export default function BookingDetailPage() {
 
   useDataRefresh(refreshRelated);
 
+  const jumpToDetailSection = useCallback((sectionId) => {
+    setTab('details');
+    setActiveDetailSection(sectionId);
+    const scroll = () => {
+      const el = document.getElementById(sectionId);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    };
+    // Tab content may mount on next paint
+    if (!scroll()) {
+      requestAnimationFrame(() => {
+        if (!scroll()) setTimeout(scroll, 50);
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading || !form || tab !== 'details') return undefined;
+
+    const nodes = DETAIL_SECTIONS.map((s) => document.getElementById(s.id)).filter(Boolean);
+    if (!nodes.length) return undefined;
+
+    const ratios = new Map();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          ratios.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+        });
+        let bestId = null;
+        let bestRatio = 0;
+        ratios.forEach((ratio, id) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestId = id;
+          }
+        });
+        if (bestId) setActiveDetailSection(bestId);
+      },
+      { rootMargin: '-20% 0px -55% 0px', threshold: [0, 0.15, 0.35, 0.55, 1] }
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [tab, loading, form]);
+
   const updatesPanelProps = {
     items: recentUpdates,
     title: 'Recent updates',
@@ -526,14 +713,10 @@ export default function BookingDetailPage() {
           : 'No client updates yet. Changes from the portal will appear here.',
   };
 
-  if (loading || !form) {
-    return <BookingSkeleton />;
-  }
-
   const renderSectionsNav = () => (
     <NavCard>
       <NavTitle>Sections</NavTitle>
-      <NavHint>Jump between booking areas</NavHint>
+      <NavHint>Main areas + Details sections</NavHint>
       <VerticalTabsList aria-label="Booking sections">
         {TAB_ITEMS.map((item) => (
           <VerticalTabsTrigger key={item.value} value={item.value}>
@@ -541,8 +724,25 @@ export default function BookingDetailPage() {
           </VerticalTabsTrigger>
         ))}
       </VerticalTabsList>
+      <DetailNavList aria-label="Details sections">
+        {DETAIL_SECTIONS.map((section) => (
+          <li key={section.id}>
+            <DetailNavBtn
+              type="button"
+              $active={tab === 'details' && activeDetailSection === section.id}
+              onClick={() => jumpToDetailSection(section.id)}
+            >
+              {section.label}
+            </DetailNavBtn>
+          </li>
+        ))}
+      </DetailNavList>
     </NavCard>
   );
+
+  if (loading || !form) {
+    return <BookingSkeleton />;
+  }
 
   return (
     <AdminShell wide>
@@ -560,6 +760,11 @@ export default function BookingDetailPage() {
                   ]}
                   eyebrow={form.sb_number}
                   title={form.campaign_name || form.client_company || 'Untitled booking'}
+                  actions={
+                    <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                      Import from document
+                    </Button>
+                  }
                 />
 
                 <StatusRow>
@@ -574,67 +779,130 @@ export default function BookingDetailPage() {
                   <FieldAddon $withLabel>
                     <Badge $tone="info">v{form.current_version}</Badge>
                     {dirty && <Badge $tone="warning">Unsaved changes</Badge>}
+                    {remoteAhead && <Badge $tone="warning">Remote updates</Badge>}
                   </FieldAddon>
                 </StatusRow>
 
+                {remoteAhead && dirty && (
+                  <RemoteBanner role="status">
+                    <span>
+                      <strong>Portal or another session updated this booking.</strong> Saving now
+                      may overwrite those changes.
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        await load();
+                        refreshRecentUpdates();
+                        toast('Loaded latest booking');
+                      }}
+                    >
+                      Load latest
+                    </Button>
+                  </RemoteBanner>
+                )}
+
                 <MobileSections>{renderSectionsNav()}</MobileSections>
                 <TabsContent value="details">
-                  <ReferenceBudgetSection values={form} onChange={onChange} errors={errors} />
-                  <ClientCampaignSection values={form} onChange={onChange} errors={errors} />
-                  <JcdContactSection values={form} onChange={onChange} errors={errors} />
-                  <InvoiceSection values={form} onChange={onChange} errors={errors} allowPoOverride />
-                  <ClientNotesSection values={form} onChange={onChange} />
-                  <InternalNotesSection values={form} onChange={onChange} />
+                  <CampaignDetailsSection
+                    id="admin-campaign"
+                    values={form}
+                    onChange={onChange}
+                    errors={errors}
+                    showRateCard
+                    showAdminOwnership
+                    scheduleEntries={data.schedule}
+                    poFiles={
+                      <FilesSection
+                        bookingId={id}
+                        files={data.files}
+                        categoryStatuses={data.categoryStatuses}
+                        onRefresh={refreshRelated}
+                        isAdmin
+                        categories={PO_FILE_CATEGORIES}
+                        title="PO Document Upload"
+                        hint={`Attach purchase order documents (max ${MAX_FILE_SIZE_MB}MB per file). Multiple files allowed.`}
+                        hideChrome={false}
+                      />
+                    }
+                  />
+                  <ContactInformationSection
+                    id="admin-contact"
+                    values={form}
+                    onChange={onChange}
+                    errors={errors}
+                  />
+                  <ShootRequirementsSection
+                    id="admin-schedule"
+                    booking={form}
+                    entries={data.schedule}
+                    onAdd={async (entry) => {
+                      await api.post(`/api/bookings/${id}/schedule`, entry);
+                      toast('Shoot day added');
+                      await refreshRelated();
+                    }}
+                    onUpdate={async (entry) => {
+                      await api.patch(`/api/bookings/${id}/schedule`, entry);
+                      toast('Shoot day updated');
+                      await refreshRelated();
+                    }}
+                    onRemove={async (entryId) => {
+                      await api.delete(`/api/bookings/${id}/schedule`, { entryId });
+                      toast('Shoot day removed');
+                      await refreshRelated();
+                    }}
+                  />
+                  <SitesSection
+                    values={form}
+                    onChange={onChange}
+                    sites={data.sites}
+                    onAdd={async (site) => {
+                      await api.post(`/api/bookings/${id}/sites`, site);
+                      toast('Site added');
+                      await refreshRelated();
+                    }}
+                    onRemove={async (siteId) => {
+                      await api.delete(`/api/bookings/${id}/sites`, { entryId: siteId });
+                      toast('Site removed');
+                      await refreshRelated();
+                    }}
+                  />
+                  <DeliverablesSection
+                    id="admin-deliverables"
+                    values={form}
+                    onChange={onChange}
+                    errors={errors}
+                    showAdminOverride
+                    filesSlot={
+                      <FilesSection
+                        bookingId={id}
+                        files={data.files}
+                        categoryStatuses={data.categoryStatuses}
+                        onRefresh={refreshRelated}
+                        isAdmin
+                        categories={DELIVERABLE_FILE_CATEGORIES}
+                        title="Files"
+                        hideChrome
+                      />
+                    }
+                  />
+                  <div id="admin-internal-notes" style={{ scrollMarginTop: '5.5rem' }}>
+                    <InternalNotesSection values={form} onChange={onChange} />
+                  </div>
                 </TabsContent>
 
-              <TabsContent value="schedule">
-                <ScheduleSection
-                  entries={data.schedule}
-                  onAdd={async (entry) => {
-                    await api.post(`/api/bookings/${id}/schedule`, entry);
-                    toast('Schedule entry added');
-                    await refreshRelated();
-                  }}
-                  onUpdate={async (entry) => {
-                    await api.patch(`/api/bookings/${id}/schedule`, entry);
-                    toast('Schedule entry updated');
-                    await refreshRelated();
-                  }}
-                  onRemove={async (entryId) => {
-                    await api.delete(`/api/bookings/${id}/schedule`, { entryId });
-                    toast('Schedule entry removed');
-                    await refreshRelated();
-                  }}
-                />
-                <SitesSection
-                  values={form}
-                  onChange={onChange}
-                  sites={data.sites}
-                  onAdd={async (entry) => {
-                    await api.post(`/api/bookings/${id}/sites`, entry);
-                    toast('Site added');
-                    await refreshRelated();
-                  }}
-                  onRemove={async (entryId) => {
-                    await api.delete(`/api/bookings/${id}/sites`, { entryId });
-                    toast('Site removed');
-                    await refreshRelated();
-                  }}
-                />
-              </TabsContent>
-
-              <TabsContent value="files">
-                <FilesSection
-                  bookingId={id}
-                  files={data.files}
-                  categoryStatuses={data.categoryStatuses}
-                  onRefresh={refreshRelated}
-                  isAdmin
-                />
+              <TabsContent value="calendar">
+                <CalendarSection entries={data.schedule} />
               </TabsContent>
 
               <TabsContent value="portal">
-                <PortalControls bookingId={id} portal={data.portal} onRefresh={refreshRelated} />
+                <PortalControls
+                  bookingId={id}
+                  portal={data.portal}
+                  booking={form}
+                  onRefresh={refreshRelated}
+                />
                 <PermissionsPanel
                   key={data.portal?.id || `booking-${id}`}
                   permissions={permissionsMap}
@@ -643,6 +911,14 @@ export default function BookingDetailPage() {
                     data.portal?.status === 'locked' ||
                     data.portal?.status === 'disabled' ||
                     !!data.portal?.editing_locked
+                  }
+                  portalEditableHint={
+                    data.portal &&
+                    data.portal.status === 'active' &&
+                    !data.portal.editing_locked &&
+                    data.portal.manual_unlock
+                      ? 'Clients can edit (manually unlocked).'
+                      : null
                   }
                   onSave={async (perms) => {
                     await api.put(`/api/bookings/${id}/permissions`, { permissions: perms });
@@ -776,6 +1052,36 @@ export default function BookingDetailPage() {
             </p>
           )}
         </Modal>
+
+        <DocumentImportDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          mode="full"
+          bookingId={id}
+          currentValues={form}
+          existingSchedule={data.schedule}
+          onApplyFields={(patch) => {
+            setForm((f) => ({ ...f, ...patch }));
+            setDirty(true);
+            setErrors((e) => {
+              const next = { ...e };
+              for (const key of Object.keys(patch)) delete next[key];
+              return next;
+            });
+          }}
+          onApplied={async ({ patch = {}, sitesAdded = 0, scheduleAdded = 0 } = {}) => {
+            if (sitesAdded || scheduleAdded) {
+              const result = await api.get(`/api/bookings/${id}`);
+              setData(result);
+              // Imported scalar fields win over server snapshot
+              setForm((f) => ({ ...result.booking, ...f, ...patch }));
+              if (Object.keys(patch).length) setDirty(true);
+              refreshRecentUpdates();
+            }
+            if (scheduleAdded) setTab('calendar');
+            else if (Object.keys(patch).length) setTab('details');
+          }}
+        />
       </BookingLayout>
     </AdminShell>
   );

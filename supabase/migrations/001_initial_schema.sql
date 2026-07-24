@@ -58,7 +58,10 @@ DO $$ BEGIN
     'brand_guidelines',
     'reference_mood',
     'purchase_order_invoice',
-    'other_documents'
+    'other_documents',
+    'media_plan',
+    'site_lists',
+    'creatives'
   );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
@@ -106,6 +109,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   currency TEXT NOT NULL DEFAULT 'GBP',
   budget NUMERIC(14, 2),
   budget_required BOOLEAN NOT NULL DEFAULT FALSE,
+  brand TEXT,
   campaign_name TEXT,
   city_market TEXT,
   client_company TEXT,
@@ -114,6 +118,22 @@ CREATE TABLE IF NOT EXISTS bookings (
   jcd_contact_name TEXT,
   jcd_contact_email TEXT,
   cc_emails TEXT[] NOT NULL DEFAULT '{}',
+  format_type TEXT,
+  format_type_other TEXT,
+  campaign_start DATE,
+  campaign_end DATE,
+  calculated_delivery_date DATE,
+  delivery_date_override DATE,
+  in_charge_reference TEXT,
+  in_charge_period_start DATE,
+  in_charge_period_end DATE,
+  portal_lock_date DATE,
+  auto_lock_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  half_day_rate NUMERIC(14, 2) NOT NULL DEFAULT 640,
+  full_day_rate NUMERIC(14, 2) NOT NULL DEFAULT 1040,
+  rate_card_label TEXT NOT NULL DEFAULT 'JCD Rates',
+  mpc_owner_name TEXT,
+  mpc_backup_owner_name TEXT,
   mpc_chooses_sites BOOLEAN NOT NULL DEFAULT TRUE,
   po_required BOOLEAN NOT NULL DEFAULT FALSE,
   po_received BOOLEAN NOT NULL DEFAULT FALSE,
@@ -146,6 +166,7 @@ CREATE TABLE IF NOT EXISTS portal_access (
   status portal_status NOT NULL DEFAULT 'draft',
   expires_at TIMESTAMPTZ,
   editing_locked BOOLEAN NOT NULL DEFAULT FALSE,
+  manual_unlock BOOLEAN NOT NULL DEFAULT FALSE,
   status_portal_editable JSONB NOT NULL DEFAULT '{
     "draft": true,
     "waiting_for_client": true,
@@ -176,6 +197,12 @@ COMMENT ON COLUMN portal_access.pin IS
 COMMENT ON COLUMN portal_access.status_portal_editable IS
   'Map of booking_status → whether the client portal remains editable in that status.';
 
+COMMENT ON COLUMN portal_access.manual_unlock IS
+  'When true, admin explicitly unlocked editing; skip auto-lock and status-map soft locks until locked again.';
+
+-- Idempotent add for databases created before manual_unlock existed
+ALTER TABLE portal_access
+  ADD COLUMN IF NOT EXISTS manual_unlock BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_portal_token_prefix ON portal_access(access_token_prefix);
 
 -- Per-portal field permissions
@@ -223,12 +250,16 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_portal_sessions_token ON portal_sessions(session_token_hash);
 
--- Schedule entries
+-- Schedule / shoot requirement entries
 CREATE TABLE IF NOT EXISTS schedule_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
   shoot_date DATE NOT NULL,
-  format TEXT NOT NULL,
+  day_length NUMERIC(3, 1),
+  city TEXT,
+  applied_rate NUMERIC(14, 2),
+  applied_currency TEXT,
+  format TEXT DEFAULT 'Shoot',
   live_start DATE,
   live_end DATE,
   notes TEXT,
@@ -236,7 +267,8 @@ CREATE TABLE IF NOT EXISTS schedule_entries (
   updated_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT live_end_after_start CHECK (live_end IS NULL OR live_start IS NULL OR live_end >= live_start)
+  CONSTRAINT live_end_after_start CHECK (live_end IS NULL OR live_start IS NULL OR live_end >= live_start),
+  CONSTRAINT day_length_half_or_full CHECK (day_length IS NULL OR day_length IN (0.5, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedule_booking ON schedule_entries(booking_id);
@@ -351,6 +383,24 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_type, recipient_id);
 
+-- Booking reminders (missing-fields + lock notices)
+CREATE TABLE IF NOT EXISTS booking_reminders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  reminder_type TEXT NOT NULL,
+  scheduled_at TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  recipient_emails TEXT[] NOT NULL DEFAULT '{}',
+  missing_items JSONB NOT NULL DEFAULT '[]',
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  error_message TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_booking_reminders_booking ON booking_reminders(booking_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_booking_reminders_type ON booking_reminders(booking_id, reminder_type);
+
 -- Notification preferences
 CREATE TABLE IF NOT EXISTS notification_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -439,6 +489,7 @@ ALTER TABLE file_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION is_admin()
@@ -553,6 +604,12 @@ CREATE POLICY "Admins insert activity"
 DROP POLICY IF EXISTS "Admins manage notifications" ON notifications;
 CREATE POLICY "Admins manage notifications"
   ON notifications FOR ALL TO authenticated
+  USING (is_admin())
+  WITH CHECK (is_admin());
+
+DROP POLICY IF EXISTS "Admins manage booking reminders" ON booking_reminders;
+CREATE POLICY "Admins manage booking reminders"
+  ON booking_reminders FOR ALL TO authenticated
   USING (is_admin())
   WITH CHECK (is_admin());
 

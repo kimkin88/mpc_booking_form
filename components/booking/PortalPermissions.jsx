@@ -9,10 +9,24 @@ import { ConfirmDialog } from '@/components/ui/Dialog';
 import { Section, SectionTitle, SectionHint, Row, Grid } from '@/components/layout/PageHeader';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/apiClient';
-import { formatDateTime } from '@/utils/format';
+import { formatDate, formatDateTime } from '@/utils/format';
 import { BOOKING_SECTIONS, BOOKING_STATUSES, DEFAULT_FIELD_PERMISSIONS, DEFAULT_STATUS_PORTAL_EDITABLE, FIELD_LABELS, FIELD_PERMISSIONS } from '@/lib/constants';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+
+const ReminderList = styled.ul`
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const MissingList = styled.ul`
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.warning};
+`;
 
 const LinkBox = styled.div`
   font-family: ${({ theme }) => theme.fonts.mono};
@@ -127,7 +141,148 @@ function portalTone(status) {
   return 'info';
 }
 
-export function PortalControls({ bookingId, portal: portalProp, onRefresh }) {
+function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [data, setData] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await api.get(`/api/bookings/${bookingId}/reminders`);
+      setData(result);
+    } catch (err) {
+      toast(err.message, { variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, [bookingId, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const lockDate = data?.portal_lock_date || lockDateProp;
+  const autoLock = data?.auto_lock_enabled !== false;
+  const missing = data?.missing || [];
+  const reminders = data?.reminders || [];
+
+  return (
+    <div style={{ marginTop: '1.75rem' }}>
+      <SectionTitle as="h3" style={{ fontSize: '1rem' }}>
+        Auto-lock & reminders
+      </SectionTitle>
+      <SectionHint>
+        Portal locks automatically on the lock date (7 days before in-charge start). Missing-field
+        reminders go out 3 days and 1 day before lock. Emails send via Resend when configured;
+        otherwise they are logged in-app.
+      </SectionHint>
+
+      {loading ? (
+        <MutedHint>Loading automation status…</MutedHint>
+      ) : (
+        <>
+          <Grid $cols={2} style={{ marginTop: '0.75rem' }}>
+            <div>
+              <MutedHint style={{ marginBottom: 4 }}>Portal lock date</MutedHint>
+              <strong>{lockDate ? formatDate(lockDate) : 'Not calculated yet'}</strong>
+              <MutedHint style={{ marginTop: 6 }}>
+                Set campaign start date on the booking to calculate this.
+              </MutedHint>
+            </div>
+            <Switch
+              id="auto_lock_enabled"
+              label="Automatic lock enabled"
+              checked={autoLock}
+              disabled={busy}
+              onCheckedChange={async (enabled) => {
+                setBusy(true);
+                try {
+                  await api.post(`/api/bookings/${bookingId}/reminders`, {
+                    action: 'set_auto_lock',
+                    enabled,
+                  });
+                  toast(enabled ? 'Auto-lock enabled' : 'Auto-lock disabled');
+                  await load();
+                  await onRefresh?.();
+                } catch (err) {
+                  toast(err.message, { variant: 'error' });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              description="When off, this booking will not auto-lock or send scheduled reminders."
+            />
+          </Grid>
+
+          <div style={{ marginTop: '1rem' }}>
+            <MutedHint style={{ marginBottom: 4 }}>Missing fields right now</MutedHint>
+            {missing.length === 0 ? (
+              <Badge $tone="success">All required items look complete</Badge>
+            ) : (
+              <MissingList>
+                {missing.map((m) => (
+                  <li key={m.key}>{m.label}</li>
+                ))}
+              </MissingList>
+            )}
+          </div>
+
+          <Row style={{ marginTop: '1rem' }}>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const result = await api.post(`/api/bookings/${bookingId}/reminders`, {
+                    action: 'resend',
+                  });
+                  if (result.skipped && result.reason === 'complete') {
+                    toast('Nothing missing — reminder not required');
+                  } else if (result.ok === false && result.reason === 'no_email') {
+                    toast('No recipient emails on this booking', { variant: 'error' });
+                  } else {
+                    toast(
+                      result.deliveryStatus === 'stubbed'
+                        ? 'Reminder logged (email provider not configured)'
+                        : 'Reminder sent'
+                    );
+                  }
+                  await load();
+                } catch (err) {
+                  toast(err.message, { variant: 'error' });
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? 'Sending…' : 'Send missing-fields reminder now'}
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={load}>
+              Refresh
+            </Button>
+          </Row>
+
+          {reminders.length > 0 && (
+            <ReminderList>
+              {reminders.slice(0, 8).map((r) => (
+                <li key={r.id}>
+                  {r.reminder_type} · {r.delivery_status}
+                  {r.sent_at ? ` · ${formatDateTime(r.sent_at)}` : ''}
+                  {r.error_message ? ` · ${r.error_message}` : ''}
+                </li>
+              ))}
+            </ReminderList>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function PortalControls({ bookingId, portal: portalProp, booking = null, onRefresh }) {
   const { toast } = useToast();
   const [portal, setPortal] = useState(portalProp || null);
   const [url, setUrl] = useState(portalProp?.url || null);
@@ -186,6 +341,14 @@ export function PortalControls({ bookingId, portal: portalProp, onRefresh }) {
             ? 'Portal link regenerated and saved'
             : 'Portal link generated and saved'
         );
+      } else if (action === 'unlock') {
+        const { _meta, ...portalData } = data || {};
+        syncFromPortal(portalData);
+        const bits = ['Portal unlocked — clients can edit again'];
+        if (_meta?.autoLockDisabled) {
+          bits.push('auto-lock turned off so it will not re-lock immediately');
+        }
+        toast(bits.join(' · '));
       } else {
         syncFromPortal(data);
         toast('Portal updated');
@@ -226,6 +389,9 @@ export function PortalControls({ bookingId, portal: portalProp, onRefresh }) {
           <>
             <Badge $tone={portalTone(portal.status)}>{portal.status}</Badge>
             {portal.editing_locked && <Badge $tone="warning">Editing locked</Badge>}
+            {portal.manual_unlock && portal.status === 'active' && !portal.editing_locked && (
+              <Badge $tone="success">Editing unlocked</Badge>
+            )}
             {portal.expires_at && (
               <Badge $tone="warning">Expires {formatDateTime(portal.expires_at)}</Badge>
             )}
@@ -408,14 +574,20 @@ export function PortalControls({ bookingId, portal: portalProp, onRefresh }) {
         )}
       </Row>
 
+      <AutomationPanel
+        bookingId={bookingId}
+        lockDate={booking?.portal_lock_date}
+        onRefresh={onRefresh}
+      />
+
       <div style={{ marginTop: '1.75rem' }}>
         <SectionTitle as="h3" style={{ fontSize: '1rem' }}>
           Editable by booking status
         </SectionTitle>
         <SectionHint>
-          When a status is off, the portal becomes read-only for that booking status (unless you
-          unlock it later by changing status or these settings). Submit does not lock the portal by
-          itself.
+          When a status is off, the portal is read-only for that booking status. Clicking{' '}
+          <strong>Unlock editing</strong> overrides this for the current status and suppresses
+          auto-lock until you lock the portal again. Submit does not lock the portal by itself.
         </SectionHint>
         {!portal && (
           <AlertBanner>Generate a portal link before configuring status editability.</AlertBanner>
@@ -500,6 +672,7 @@ export function PermissionsPanel({
   onSave,
   hasPortal = false,
   portalLocked = false,
+  portalEditableHint = null,
 }) {
   const [local, setLocal] = useState(() => mergePermissionDefaults(permissions));
   const [saving, setSaving] = useState(false);
@@ -542,7 +715,9 @@ export function PermissionsPanel({
           the client.
         </AlertBanner>
       )}
-
+      {hasPortal && !portalLocked && portalEditableHint && (
+        <AlertBanner>{portalEditableHint}</AlertBanner>
+      )}
       <Legend aria-label="Permission legend">
         <LegendItem $tone="hidden">Hidden — not shown</LegendItem>
         <LegendItem $tone="readonly">Read-only — visible, locked</LegendItem>

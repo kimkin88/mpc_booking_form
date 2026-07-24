@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import styled from 'styled-components';
 import { AdminShell } from '@/components/layout/AdminShell';
 import { PageHeader, Section, Grid } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -11,6 +12,27 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/apiClient';
 import { CURRENCIES } from '@/lib/constants';
 
+const SbHintRow = styled.div`
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.space[2]};
+  margin-top: ${({ theme }) => theme.space[1]};
+`;
+
+const SbHint = styled.span`
+  font-size: ${({ theme }) => theme.fontSizes.xs};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const RegenerateButton = styled(Button)`
+  padding: 0.1rem 0.4rem;
+  font-size: ${({ theme }) => theme.fontSizes.xs};
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  min-height: 0;
+  line-height: 1.2;
+`;
+
 export default function NewBookingPage() {
   const [form, setForm] = useState({
     sb_number: '',
@@ -19,6 +41,7 @@ export default function NewBookingPage() {
     campaign_name: '',
     client_company: '',
     city_market: '',
+    brand: '',
   });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -115,19 +138,22 @@ export default function NewBookingPage() {
                 value={form.sb_number}
                 onChange={(e) => set('sb_number', e.target.value)}
                 error={errors.sb_number}
-                hint={suggesting ? 'Generating…' : 'Auto-generated — edit if needed'}
                 placeholder="SB-2026-001"
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={regenerateSb}
-                disabled={suggesting || saving}
-                style={{ marginTop: '0.35rem' }}
-              >
-                Regenerate
-              </Button>
+              <SbHintRow>
+                <SbHint>
+                  {suggesting ? 'Generating…' : 'Auto-generated — edit if needed'}
+                </SbHint>
+                <RegenerateButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={regenerateSb}
+                  disabled={suggesting || saving}
+                >
+                  Regenerate
+                </RegenerateButton>
+              </SbHintRow>
             </div>
             <Select
               label="Currency"
@@ -144,6 +170,11 @@ export default function NewBookingPage() {
               value={form.budget}
               onChange={(e) => set('budget', e.target.value)}
               error={errors.budget}
+            />
+            <Input
+              label="Brand"
+              value={form.brand}
+              onChange={(e) => set('brand', e.target.value)}
             />
             <Input
               label="Campaign Name"
