@@ -5,24 +5,45 @@ import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
 import { assertShootFitsBudget, costForDayLength, ratesFromBooking } from '@/lib/rateCard';
 
-function normalizeSchedulePayload(data, booking) {
+function normalizeSchedulePayload(data, booking, { actor } = {}) {
   const rates = ratesFromBooking(booking || {});
   const dayLength =
     data.day_length != null && data.day_length !== '' ? Number(data.day_length) : null;
+  const liveStart = data.live_start || null;
+  const liveEnd = data.live_end || null;
+  const isLiveFormat =
+    data.kind === 'live_format' || (liveStart && liveEnd && dayLength == null);
   const applied =
     data.applied_rate != null && data.applied_rate !== ''
       ? Number(data.applied_rate)
       : dayLength != null
         ? costForDayLength(dayLength, rates)
         : null;
-  return {
-    ...data,
-    format: data.format || 'Shoot',
+  // Never trust client-supplied authorship
+  const {
+    kind: _kind,
+    added_via: _addedVia,
+    added_by_name: _addedByName,
+    created_by: _createdBy,
+    updated_by: _updatedBy,
+    ...rest
+  } = data;
+  const row = {
+    ...rest,
+    shoot_date: data.shoot_date || liveStart,
+    live_start: liveStart,
+    live_end: liveEnd,
+    format: data.format || (isLiveFormat ? 'Format' : 'Shoot'),
     day_length: dayLength,
     city: data.city || null,
     applied_rate: applied,
     applied_currency: data.applied_currency || booking?.currency || 'GBP',
   };
+  if (actor) {
+    row.added_via = actor.source || 'admin_portal';
+    row.added_by_name = actor.name || null;
+  }
+  return row;
 }
 
 export async function GET(_request, { params }) {
@@ -57,7 +78,9 @@ export async function POST(request, { params }) {
       supabase.from('bookings').select('*').eq('id', id).single(),
       supabase.from('schedule_entries').select('*').eq('booking_id', id),
     ]);
-    const row = normalizeSchedulePayload(validation.data, booking);
+    const row = normalizeSchedulePayload(validation.data, booking, {
+      actor: { name: auth.actor.name, source: 'admin_portal' },
+    });
     if (booking && row.day_length != null) {
       try {
         assertShootFitsBudget(
@@ -186,6 +209,47 @@ export async function DELETE(request, { params }) {
     const { id } = await params;
     const body = await request.json();
     const supabase = createServiceClient();
+
+    if (body.removeLiveFormats) {
+      const { data: existing, error: listError } = await supabase
+        .from('schedule_entries')
+        .select('*')
+        .eq('booking_id', id)
+        .not('live_start', 'is', null);
+
+      if (listError) return jsonError(listError.message, 500);
+      if (!existing?.length) return jsonOk({ deleted: true, count: 0 });
+
+      const { error } = await supabase
+        .from('schedule_entries')
+        .delete()
+        .eq('booking_id', id)
+        .not('live_start', 'is', null);
+
+      if (error) return jsonError(error.message, 500);
+
+      const { versionNumber } = await bumpVersionAndSnapshot(id, {
+        id: auth.actor.id,
+        name: auth.actor.name,
+        source: 'admin_portal',
+      });
+
+      await logActivity({
+        bookingId: id,
+        versionNumber,
+        actorId: auth.actor.id,
+        actorName: auth.actor.name,
+        actorRole: 'admin',
+        action: 'schedule_entry_removed',
+        section: 'schedule',
+        previousValue: { count: existing.length, liveFormats: true },
+        source: 'admin_portal',
+      });
+
+      return jsonOk({ deleted: true, count: existing.length });
+    }
+
+    if (!body.entryId) return jsonError('entryId is required', 400);
 
     const { data: existing } = await supabase
       .from('schedule_entries')

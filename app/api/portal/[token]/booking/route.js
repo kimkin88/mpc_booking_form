@@ -159,6 +159,8 @@ export async function PATCH(request, { params }) {
             ? Number(validation.data.applied_rate)
             : null,
         applied_currency: validation.data.applied_currency || booking.currency || 'GBP',
+        added_via: 'client_portal',
+        added_by_name: clientActor.name,
       };
       const supabase = createServiceClient();
       if (row.day_length != null) {

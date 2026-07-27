@@ -22,6 +22,7 @@ import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { portalRequest } from '@/lib/apiClient';
 import { buildClientFieldState, canClientEdit, getFieldPermission } from '@/lib/permissions';
+import { shootRequirementsFromSchedule } from '@/lib/calendarFormats';
 import {
   BOOKING_SECTIONS,
   BOOKING_STATUSES,
@@ -520,11 +521,16 @@ export default function PortalPage() {
       };
     }).filter(Boolean);
 
-    if (!fieldHidden.schedule) {
-      sections.push({ id: 'portal-calendar', label: 'Calendar' });
+    // Signed-in admins previewing the portal can see the calendar (clients cannot).
+    if (data?.viewerIsAdmin) {
+      const calendarNav = { id: 'portal-calendar', label: 'Calendar' };
+      const scheduleIdx = sections.findIndex((s) => s.id === 'portal-schedule');
+      if (scheduleIdx >= 0) sections.splice(scheduleIdx + 1, 0, calendarNav);
+      else sections.push(calendarNav);
     }
+
     return sections;
-  }, [fieldHidden]);
+  }, [fieldHidden, data?.viewerIsAdmin]);
 
   const onChange = (key, value) => {
     if (fieldDisabled[key] || fieldHidden[key]) return;
@@ -897,7 +903,7 @@ export default function PortalPage() {
               fieldDisabled={{ ...fieldDisabled, budget_required: true }}
               fieldHidden={fieldHidden}
               fieldRequired={fieldRequired}
-              scheduleEntries={data.schedule}
+              scheduleEntries={shootRequirementsFromSchedule(data.schedule)}
               poFiles={
                 !fieldHidden.files ? (
                   <PoDocumentUploader
@@ -927,7 +933,7 @@ export default function PortalPage() {
               <ShootRequirementsSection
                 id="portal-schedule"
                 booking={form}
-                entries={data.schedule}
+                entries={shootRequirementsFromSchedule(data.schedule)}
                 readOnly={readOnly || fieldDisabled.schedule}
                 onAdd={async (entry) => {
                   await portalRequest(`/api/portal/${token}/booking`, {
@@ -952,6 +958,14 @@ export default function PortalPage() {
                   });
                   await loadPortal();
                 }}
+              />
+            )}
+
+            {showRecentUpdates && (
+              <CalendarSection
+                id="portal-calendar"
+                entries={data.schedule || []}
+                readOnly
               />
             )}
 
@@ -982,9 +996,7 @@ export default function PortalPage() {
               }
             />
 
-            {!fieldHidden.schedule && (
-              <CalendarSection id="portal-calendar" entries={data.schedule} />
-            )}  </FormColumn>
+            </FormColumn>
             </ContentLayout>
           </Main>
         </ScrollArea>

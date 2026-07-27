@@ -373,6 +373,8 @@ export function FilesSection({
   title = 'Files & Assets',
   hint = null,
   hideChrome = false,
+  onUseExistingDocs = null,
+  onImport = null,
 }) {
   const { toast } = useToast();
   const inputRef = useRef(null);
@@ -792,8 +794,8 @@ export function FilesSection({
           const status = statusFor(cat.value);
           return (
             <CategoryBlock key={cat.value}>
-              <Row style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                <div>
+              <Row style={{ justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <strong>{cat.label}</strong>
                   <div style={{ marginTop: '0.35rem' }}>
                     <Badge $tone={statusTone(status)}>
@@ -804,14 +806,58 @@ export function FilesSection({
                     </FileCount>
                   </div>
                 </div>
-                {isAdmin && (
-                  <Select
-                    label=""
-                    value={status}
-                    onValueChange={(v) => changeCategoryStatus(cat.value, v)}
-                    options={FILE_STATUSES}
-                  />
-                )}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    alignItems: 'flex-start',
+                    justifyContent: 'flex-end',
+                  }}
+                >
+                  {isAdmin && cat.value === 'media_plan' && typeof onImport === 'function' && (
+                    <Button
+                      type="button"
+                      variant="accent"
+                      size="sm"
+                      title="Upload or select a spreadsheet to parse booking fields"
+                      onClick={() => onImport(catFiles.filter((f) => !f.is_removed), cat.value)}
+                    >
+                      Import
+                    </Button>
+                  )}
+                  {isAdmin &&
+                    cat.value === 'media_plan' &&
+                    typeof onUseExistingDocs === 'function' && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!catFiles.some((f) => !f.is_removed)}
+                        title={
+                          catFiles.some((f) => !f.is_removed)
+                            ? 'Autofill booking fields from uploaded Media Plan files'
+                            : 'Upload a Media Plan spreadsheet first'
+                        }
+                        onClick={() =>
+                          onUseExistingDocs(
+                            catFiles.filter((f) => !f.is_removed),
+                            cat.value
+                          )
+                        }
+                      >
+                        Use existing docs
+                      </Button>
+                    )}
+                  {isAdmin && (
+                    <Select
+                      label=""
+                      value={status}
+                      onValueChange={(v) => changeCategoryStatus(cat.value, v)}
+                      options={FILE_STATUSES}
+                    />
+                  )}
+                </div>
               </Row>
 
               {catFiles.length === 0 && (

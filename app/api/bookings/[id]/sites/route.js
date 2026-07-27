@@ -117,8 +117,44 @@ export async function DELETE(request, { params }) {
 
   try {
     const { id } = await params;
-    const { entryId } = await request.json();
+    const body = await request.json();
+    const { entryId, removeAll } = body;
     const supabase = createServiceClient();
+
+    if (removeAll) {
+      const { data: existing, error: listError } = await supabase
+        .from('site_entries')
+        .select('*')
+        .eq('booking_id', id);
+
+      if (listError) return jsonError(listError.message, 500);
+      if (!existing?.length) return jsonOk({ deleted: true, count: 0 });
+
+      const { error } = await supabase.from('site_entries').delete().eq('booking_id', id);
+      if (error) return jsonError(error.message, 500);
+
+      const { versionNumber } = await bumpVersionAndSnapshot(id, {
+        id: auth.actor.id,
+        name: auth.actor.name,
+        source: 'admin_portal',
+      });
+
+      await logActivity({
+        bookingId: id,
+        versionNumber,
+        actorId: auth.actor.id,
+        actorName: auth.actor.name,
+        actorRole: 'admin',
+        action: 'site_entry_removed',
+        section: 'sites',
+        previousValue: { count: existing.length, sites: existing },
+        source: 'admin_portal',
+      });
+
+      return jsonOk({ deleted: true, count: existing.length });
+    }
+
+    if (!entryId) return jsonError('entryId is required', 400);
 
     const { data: existing } = await supabase
       .from('site_entries')

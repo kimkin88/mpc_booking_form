@@ -263,6 +263,9 @@ CREATE TABLE IF NOT EXISTS schedule_entries (
   live_start DATE,
   live_end DATE,
   notes TEXT,
+  -- Who created this row: admin app vs client portal (shown on calendar / shoot list)
+  added_via activity_source NOT NULL DEFAULT 'admin_portal',
+  added_by_name TEXT,
   created_by UUID REFERENCES profiles(id),
   updated_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -643,3 +646,41 @@ CREATE POLICY "Admins delete booking files"
 -- Note: Client portal access is handled exclusively via service-role
 -- API routes that validate portal tokens / sessions. Clients never
 -- receive a Supabase anon JWT with direct table access.
+
+-- ---------------------------------------------------------------------------
+-- Schedule authorship (admin vs client portal) — safe to re-run on existing DBs
+-- ---------------------------------------------------------------------------
+ALTER TABLE schedule_entries
+  ADD COLUMN IF NOT EXISTS added_via activity_source NOT NULL DEFAULT 'admin_portal';
+
+ALTER TABLE schedule_entries
+  ADD COLUMN IF NOT EXISTS added_by_name TEXT;
+
+-- Best-effort backfill from activity log (latest schedule_entry_added per entry).
+UPDATE schedule_entries se
+SET
+  added_via = ae.source,
+  added_by_name = ae.actor_name
+FROM (
+  SELECT DISTINCT ON (entry_id)
+    entry_id,
+    source,
+    actor_name
+  FROM (
+    SELECT
+      CASE
+        WHEN (new_value->>'id') ~* '^[0-9a-f-]{36}$'
+          THEN (new_value->>'id')::uuid
+        ELSE NULL
+      END AS entry_id,
+      source,
+      actor_name,
+      created_at
+    FROM activity_entries
+    WHERE action = 'schedule_entry_added'
+      AND new_value ? 'id'
+  ) parsed
+  WHERE entry_id IS NOT NULL
+  ORDER BY entry_id, created_at DESC
+) ae
+WHERE se.id = ae.entry_id;

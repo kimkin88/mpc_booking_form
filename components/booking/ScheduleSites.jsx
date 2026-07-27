@@ -1,64 +1,91 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
-import { Badge, EmptyState } from '@/components/ui/Tabs';
+import { EmptyState, Badge } from '@/components/ui/Tabs';
 import { RemoveIconButton } from '@/components/ui/IconButton';
 import { Section, SectionTitle, SectionHint, Grid, Row } from '@/components/layout/PageHeader';
-import { formatDate, formatCurrency } from '@/utils/format';
+import { formatDate } from '@/utils/format';
+import {
+  colorForLiveEntry,
+  entryCoversDate,
+  formatsOnDate,
+  formatLiveDate,
+  scheduleAddedByMeta,
+  SHOOT_DAY_COLOR,
+  shootDatesFromSchedule,
+  shootsOnDate,
+  uniqueLiveFormats,
+} from '@/lib/calendarFormats';
 
 const CalendarShell = styled.div`
   background: ${({ theme }) => theme.colors.surface};
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radii.lg};
-  padding: ${({ theme }) => theme.space[4]};
+  padding: ${({ theme }) => theme.space[5]};
   margin-bottom: ${({ theme }) => theme.space[5]};
   box-shadow: ${({ theme }) => theme.shadows.sm};
 `;
 
 const MonthNav = styled.div`
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: ${({ theme }) => theme.space[3]};
+  justify-content: center;
+  gap: ${({ theme }) => theme.space[4]};
   margin-bottom: ${({ theme }) => theme.space[4]};
   color: ${({ theme }) => theme.colors.text};
 `;
 
 const MonthTitle = styled.h3`
   margin: 0;
-  flex: 1;
+  min-width: 9rem;
   text-align: center;
   font-family: ${({ theme }) => theme.fonts.display};
   font-size: ${({ theme }) => theme.fontSizes.xl};
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  min-width: 10rem;
 `;
 
-const NavButtons = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: ${({ theme }) => theme.space[2]};
+const ChevronBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: none;
+  border-radius: ${({ theme }) => theme.radii.md};
+  background: transparent;
+  color: ${({ theme }) => theme.colors.textMuted};
+  cursor: pointer;
+  font-size: 1.85rem;
+  line-height: 1;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bgMuted};
+    color: ${({ theme }) => theme.colors.text};
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.focus};
+    outline-offset: 2px;
+  }
 `;
 
 const Weekdays = styled.div`
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 0;
+  margin-bottom: 0.35rem;
 `;
 
 const Weekday = styled.div`
   text-align: center;
   font-size: ${({ theme }) => theme.fontSizes.xs};
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: ${({ theme }) => theme.colors.textMuted};
   padding: 0.35rem 0;
 `;
@@ -66,140 +93,245 @@ const Weekday = styled.div`
 const Calendar = styled.div`
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 0;
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+  border-left: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const DayCell = styled.button`
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.2rem;
-  min-height: 3.25rem;
-  padding: 0.35rem 0.2rem 0.45rem;
-  border: 2px solid
-    ${({ theme, $selected, $today, $hasEntries }) => {
-      if ($selected) return theme.colors.primary;
-      if ($today) return theme.colors.success;
-      if ($hasEntries) return theme.colors.accent;
-      return theme.colors.border;
-    }};
-  background: ${({ theme, $selected, $hasEntries, $outside, $today }) => {
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 4.5rem;
+  padding: 0.35rem 0 0.45rem;
+  border: none;
+  border-right: 1px solid ${({ theme }) => theme.colors.border};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme, $outside, $selected, $today }) => {
+    if ($selected) return theme.colors.surface;
+    if ($today && !$outside) return theme.colors.primaryMuted;
     if ($outside) return theme.colors.bgMuted;
-    if ($selected) return theme.colors.primaryMuted;
-    if ($today) return theme.colors.successMuted;
-    if ($hasEntries) return theme.colors.accentMuted;
-    return theme.colors.bg;
+    return theme.colors.surface;
   }};
-  border-radius: ${({ theme }) => theme.radii.md};
+  box-shadow: ${({ $selected }) =>
+    $selected ? `inset 0 0 0 2px ${SHOOT_DAY_COLOR}` : 'none'};
   cursor: pointer;
   color: ${({ theme, $outside }) => ($outside ? theme.colors.textMuted : theme.colors.text)};
-  transition:
-    background ${({ theme }) => theme.transitions.fast},
-    border-color ${({ theme }) => theme.transitions.fast},
-    transform ${({ theme }) => theme.transitions.fast},
-    box-shadow ${({ theme }) => theme.transitions.fast};
+  z-index: ${({ $selected }) => ($selected ? 1 : 0)};
 
   @media (min-width: ${({ theme }) => theme.breakpoints.md}) {
-    min-height: 3.75rem;
+    min-height: 5.25rem;
   }
 
-  &:hover:not(:disabled) {
-    border-color: ${({ theme }) => theme.colors.primary};
-    background: ${({ theme }) => theme.colors.primaryMuted};
-    transform: translateY(-1px);
-    box-shadow: ${({ theme }) => theme.shadows.sm};
+  &:hover {
+    background: ${({ theme }) => theme.colors.bgMuted};
   }
 
   &:focus-visible {
     outline: 2px solid ${({ theme }) => theme.colors.focus};
-    outline-offset: 2px;
+    outline-offset: -2px;
+    z-index: 2;
   }
+`;
 
-  &:disabled {
-    cursor: default;
-    opacity: 0.55;
-  }
+const DayNumberWrap = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 1.5rem;
+  margin-bottom: 0.2rem;
 `;
 
 const DayNumber = styled.span`
-  font-size: ${({ theme }) => theme.fontSizes.md};
-  font-weight: ${({ theme, $selected, $today }) =>
-    $selected || $today ? theme.fontWeights.bold : theme.fontWeights.semibold};
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: ${({ theme, $today, $selected }) => {
-    if ($selected) return theme.colors.primary;
-    if ($today) return theme.colors.success;
-    return 'inherit';
-  }};
-`;
-
-const DayMeta = styled.span`
-  font-size: 0.62rem;
-  font-weight: ${({ theme }) => theme.fontWeights.semibold};
-  line-height: 1.15;
-  text-align: center;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 0.15rem;
-  color: ${({ theme, $selected }) => ($selected ? theme.colors.primary : theme.colors.accent)};
-  min-height: 0.65rem;
-`;
-
-const CalendarLegend = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: ${({ theme }) => theme.space[4]};
-  margin-top: ${({ theme }) => theme.space[4]};
-  padding-top: ${({ theme }) => theme.space[3]};
-  border-top: 1px solid ${({ theme }) => theme.colors.border};
-  font-size: ${({ theme }) => theme.fontSizes.xs};
-  color: ${({ theme }) => theme.colors.textMuted};
-`;
-
-const LegendItem = styled.span`
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  background: ${({ $shoot, theme, $today }) => {
+    if ($shoot) return SHOOT_DAY_COLOR;
+    if ($today) return theme.colors.text;
+    return 'transparent';
+  }};
+  color: ${({ theme, $shoot, $outside, $today }) => {
+    if ($shoot || $today) return theme.colors.onPrimary || '#fff';
+    if ($outside) return theme.colors.textMuted;
+    return theme.colors.text;
+  }};
+  box-shadow: ${({ $today, $shoot, theme }) =>
+    $today && !$shoot ? `0 0 0 2px ${theme.colors.primaryMuted}` : 'none'};
 `;
 
-const LegendSwatch = styled.span`
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: ${({ theme }) => theme.radii.sm};
-  border: 2px solid ${({ theme, $tone }) => {
-    if ($tone === 'selected') return theme.colors.primary;
-    if ($tone === 'today') return theme.colors.success;
-    if ($tone === 'booked') return theme.colors.accent;
-    return theme.colors.border;
+const DayBars = styled.div`
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  width: 100%;
+  padding-top: 0.15rem;
+`;
+
+const DayBar = styled.span`
+  display: block;
+  height: 7px;
+  width: 100%;
+  border-radius: 0;
+  background: ${({ $color, $empty }) => ($empty ? 'transparent' : $color || '#8a9bb0')};
+  opacity: ${({ $faded, $empty }) => {
+    if ($empty) return 0;
+    return $faded ? 0.45 : 1;
   }};
-  background: ${({ theme, $tone }) => {
-    if ($tone === 'selected') return theme.colors.primaryMuted;
-    if ($tone === 'today') return theme.colors.successMuted;
-    if ($tone === 'booked') return theme.colors.accentMuted;
-    return theme.colors.surface;
-  }};
+  /* Keep lane height even when inactive so colours stay aligned across days */
+  flex-shrink: 0;
+`;
+
+const FormatPills = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: ${({ theme }) => theme.space[4]};
+`;
+
+const FormatPill = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  font-weight: ${({ theme }) => theme.fontWeights.medium};
+  background: ${({ $soft }) => $soft || '#eceff3'};
+  color: ${({ $text }) => $text || 'inherit'};
+  border: none;
+`;
+
+const FormatDot = styled.span`
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: ${({ $color }) => $color || '#8a9bb0'};
+  flex-shrink: 0;
+`;
+
+const FormatCard = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.space[3]};
+  padding: 1rem 1.15rem;
+  margin-bottom: ${({ theme }) => theme.space[3]};
+  border-radius: ${({ theme }) => theme.radii.lg};
+  border: none;
+  background: ${({ $soft }) => $soft || '#f7f7f7'};
+`;
+
+const FormatCardMain = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+`;
+
+const FormatCardTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  font-size: ${({ theme }) => theme.fontSizes.md};
+  color: ${({ $text }) => $text || 'inherit'};
+`;
+
+const FormatCardMeta = styled.div`
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.textMuted};
+  padding-left: 1.1rem;
 `;
 
 const SelectedDayPanel = styled.div`
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: ${({ theme }) => theme.space[3]};
-  margin-bottom: ${({ theme }) => theme.space[4]};
-  padding: ${({ theme }) => theme.space[3]} ${({ theme }) => theme.space[4]};
-  background: ${({ theme }) => theme.colors.primaryMuted};
-  border: 1px solid ${({ theme }) => theme.colors.primary};
-  border-radius: ${({ theme }) => theme.radii.md};
+  margin-bottom: ${({ theme }) => theme.space[3]};
 `;
 
 const SelectedDayLabel = styled.strong`
-  font-size: ${({ theme }) => theme.fontSizes.md};
+  font-size: ${({ theme }) => theme.fontSizes.lg};
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
   color: ${({ theme }) => theme.colors.text};
+`;
+
+const SelectedDayCount = styled.span`
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const DayGroupTitle = styled.h4`
+  margin: ${({ theme }) => theme.space[4]} 0 ${({ theme }) => theme.space[2]};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  color: ${({ theme }) => theme.colors.textMuted};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  &:first-of-type {
+    margin-top: 0;
+  }
+`;
+
+const CardBadgeRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+`;
+
+const ShootLegend = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  color: ${({ theme }) => theme.colors.textMuted};
+`;
+
+const LegendRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: ${({ theme }) => theme.space[4]};
+  margin-top: ${({ theme }) => theme.space[3]};
+`;
+
+const ShootLegendDot = styled.span`
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: ${SHOOT_DAY_COLOR};
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const TodayLegendDot = styled.span`
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.text};
+  display: inline-flex;
+  flex-shrink: 0;
 `;
 
 const EntryCard = styled.div`
@@ -267,57 +399,43 @@ function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
-function dayLengthLabel(dayLength) {
-  const n = Number(dayLength);
-  if (n === 0.5) return '0.5 day';
-  if (n === 1) return '1 day';
-  if (Number.isFinite(n) && n > 0) return `${n} day`;
-  return null;
-}
+/** Section 5 — Live format calendar + shoot requirement days */
+export function CalendarSection({
+  entries = [],
+  locale = 'en-GB',
+  id,
+  onRemove,
+  readOnly = false,
+}) {
+  const liveFormats = useMemo(() => uniqueLiveFormats(entries), [entries]);
+  const shootDates = useMemo(() => shootDatesFromSchedule(entries), [entries]);
 
-function shootCellLabel(dayEntries = []) {
-  if (!dayEntries.length) return '\u00A0';
-  if (dayEntries.length > 1) return `${dayEntries.length} shoots`;
-  const e = dayEntries[0];
-  const length = dayLengthLabel(e.day_length);
-  const city = e.city ? String(e.city).trim() : '';
-  if (length && city) return `${length.replace(' day', 'd')} · ${city}`;
-  if (city) return city;
-  if (length) return length;
-  return 'Shoot';
-}
-
-function shootAriaLabel(dayEntries = []) {
-  if (!dayEntries.length) return '';
-  return dayEntries
-    .map((e) => {
-      const parts = [
-        dayLengthLabel(e.day_length),
-        e.city || null,
-        e.applied_rate != null
-          ? formatCurrency(e.applied_rate, e.applied_currency || 'GBP')
-          : null,
-      ].filter(Boolean);
-      return parts.join(', ') || 'Shoot';
-    })
-    .join('; ');
-}
-
-/** Section 5 — Calendar of preferred shoot dates from booking requirements */
-export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(null);
+  const [didAutoFocus, setDidAutoFocus] = useState(false);
 
-  const entriesByDate = useMemo(() => {
-    const map = new Map();
-    entries.forEach((e) => {
-      const key = e.shoot_date ? String(e.shoot_date).slice(0, 10) : null;
-      if (!key) return;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(e);
-    });
-    return map;
-  }, [entries]);
+  useEffect(() => {
+    if (didAutoFocus) return;
+    const firstLive = liveFormats[0];
+    const firstShoot = [...shootDates].sort()[0];
+    const start = String(firstLive?.live_start || firstShoot || '').slice(0, 10);
+    if (!start) return;
+    setCursor(startOfMonth(new Date(`${start}T12:00:00`)));
+    let pick = start;
+    if (firstLive) {
+      for (const dayOffset of [0, 1, 2, 3, 4, 5, 6]) {
+        const d = new Date(`${start}T12:00:00`);
+        d.setDate(d.getDate() + dayOffset);
+        const key = toKey(d);
+        if (formatsOnDate(entries, key, liveFormats).length >= 2) {
+          pick = key;
+          break;
+        }
+      }
+    }
+    setSelected(pick);
+    setDidAutoFocus(true);
+  }, [didAutoFocus, entries, liveFormats, shootDates]);
 
   const days = useMemo(() => {
     const first = startOfMonth(cursor);
@@ -332,52 +450,40 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
     return cells;
   }, [cursor]);
 
-  const todayKey = toKey(new Date());
   const selectedKey = selected ? String(selected).slice(0, 10) : null;
-  const selectedEntries = selectedKey ? entriesByDate.get(selectedKey) || [] : [];
-
-  const goToday = () => {
-    const now = new Date();
-    setCursor(startOfMonth(now));
-    setSelected(toKey(now));
-  };
+  const selectedFormats = selectedKey
+    ? formatsOnDate(entries, selectedKey, liveFormats)
+    : [];
+  const selectedShoots = selectedKey ? shootsOnDate(entries, selectedKey) : [];
+  const todayKey = toKey(new Date());
 
   return (
     <Section id={id}>
-      <SectionTitle>Calendar</SectionTitle>
+      <SectionTitle>Shoot Schedule &amp; Live Dates</SectionTitle>
       <SectionHint>
-        Preferred shoot dates are highlighted. Select a day to see full shoot details (length, city,
-        cost).
+        Orange day numbers are manually added shoot requirements. Coloured bars are live media
+        formats from the media plan. Click a day to review both.
       </SectionHint>
 
       <CalendarShell>
         <MonthNav>
-          <NavButtons>
-            <Button
-              variant="secondary"
-              size="sm"
-              aria-label="Previous month"
-              onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
-            >
-              ← Prev
-            </Button>
-          </NavButtons>
+          <ChevronBtn
+            type="button"
+            aria-label="Previous month"
+            onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}
+          >
+            ‹
+          </ChevronBtn>
           <MonthTitle>
             {cursor.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
           </MonthTitle>
-          <NavButtons>
-            <Button variant="secondary" size="sm" onClick={goToday}>
-              Today
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              aria-label="Next month"
-              onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}
-            >
-              Next →
-            </Button>
-          </NavButtons>
+          <ChevronBtn
+            type="button"
+            aria-label="Next month"
+            onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))}
+          >
+            ›
+          </ChevronBtn>
         </MonthNav>
 
         <Weekdays aria-hidden>
@@ -386,26 +492,28 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
           ))}
         </Weekdays>
 
-        <Calendar role="grid" aria-label="Preferred shoot dates calendar">
+        <Calendar role="grid" aria-label="Shoot schedule and live format calendar">
           {days.map((day) => {
             const key = toKey(day);
             const outside = day.getMonth() !== cursor.getMonth();
-            const dayEntries = entriesByDate.get(key) || [];
-            const count = dayEntries.length;
-            const isToday = key === todayKey;
+            const dayFormats = formatsOnDate(entries, key, liveFormats);
             const isSelected = selected === key;
-            const shootInfo = shootAriaLabel(dayEntries);
+            const isShoot = shootDates.has(key);
+            const isToday = key === todayKey;
             return (
               <DayCell
                 key={key}
                 type="button"
                 $outside={outside}
                 $selected={isSelected}
-                $hasEntries={count > 0}
-                $today={isToday && !isSelected}
-                title={shootInfo || undefined}
+                $today={isToday}
+                aria-current={isToday ? 'date' : undefined}
                 aria-label={`${formatDate(day, locale)}${isToday ? ', today' : ''}${
-                  shootInfo ? `, ${shootInfo}` : ''
+                  isShoot ? ', shoot day' : ''
+                }${
+                  dayFormats.length
+                    ? `, ${dayFormats.length} format${dayFormats.length === 1 ? '' : 's'} live`
+                    : ''
                 }${isSelected ? ', selected' : ''}`}
                 aria-pressed={isSelected}
                 onClick={() => {
@@ -413,92 +521,167 @@ export function CalendarSection({ entries = [], locale = 'en-GB', id }) {
                   if (outside) setCursor(startOfMonth(day));
                 }}
               >
-                <DayNumber $selected={isSelected} $today={isToday}>
-                  {day.getDate()}
-                </DayNumber>
-                <DayMeta $selected={isSelected}>{shootCellLabel(dayEntries)}</DayMeta>
+                <DayNumberWrap>
+                  <DayNumber $shoot={isShoot} $outside={outside} $today={isToday && !outside}>
+                    {day.getDate()}
+                  </DayNumber>
+                </DayNumberWrap>
+                <DayBars>
+                  {liveFormats.map((entry) => {
+                    const color = colorForLiveEntry(entry, liveFormats);
+                    const active = entryCoversDate(entry, key);
+                    return (
+                      <DayBar
+                        key={entry.id || `${entry.format}-${entry.live_start}-${entry.live_end}`}
+                        $color={color.bar}
+                        $empty={!active}
+                        $faded={outside}
+                        title={active ? entry.format : undefined}
+                      />
+                    );
+                  })}
+                </DayBars>
               </DayCell>
             );
           })}
         </Calendar>
 
-        <CalendarLegend>
-          <LegendItem>
-            <LegendSwatch $tone="today" /> Today
-          </LegendItem>
-          <LegendItem>
-            <LegendSwatch $tone="booked" /> Preferred shoot date
-          </LegendItem>
-          <LegendItem>
-            <LegendSwatch $tone="selected" /> Selected
-          </LegendItem>
-        </CalendarLegend>
+        {liveFormats.length > 0 && (
+          <FormatPills>
+            {liveFormats.map((entry) => {
+              const color = colorForLiveEntry(entry, liveFormats);
+              return (
+                <FormatPill
+                  key={entry.id || `${entry.format}-${entry.live_start}-${entry.live_end}`}
+                  $soft={color.soft}
+                  $text={color.text}
+                >
+                  <FormatDot $color={color.bar} />
+                  {entry.format} {formatLiveDate(entry.live_start, locale)} –{' '}
+                  {formatLiveDate(entry.live_end, locale)}
+                </FormatPill>
+              );
+            })}
+          </FormatPills>
+        )}
+
+        <LegendRow>
+          <ShootLegend>
+            <TodayLegendDot aria-hidden />
+            Today
+          </ShootLegend>
+          {shootDates.size > 0 && (
+            <ShootLegend>
+              <ShootLegendDot aria-hidden>●</ShootLegendDot>
+              Shoot requirement day
+              {shootDates.size > 1 ? `s (${shootDates.size})` : ''}
+            </ShootLegend>
+          )}
+        </LegendRow>
       </CalendarShell>
 
       {selected ? (
         <>
           <SelectedDayPanel>
-            <SelectedDayLabel>{formatDate(selected, locale)}</SelectedDayLabel>
-            <Badge $tone="accent">
-              {selectedEntries.length} shoot{selectedEntries.length === 1 ? '' : 's'}
-            </Badge>
+            <SelectedDayLabel>
+              {new Date(`${selectedKey}T12:00:00`).toLocaleDateString(locale, {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </SelectedDayLabel>
+            <SelectedDayCount>
+              {selectedShoots.length
+                ? `${selectedShoots.length} shoot${selectedShoots.length === 1 ? '' : 's'}`
+                : null}
+              {selectedShoots.length && selectedFormats.length ? ' · ' : null}
+              {selectedFormats.length
+                ? `${selectedFormats.length} format${selectedFormats.length === 1 ? '' : 's'} live`
+                : selectedShoots.length
+                  ? null
+                  : 'Nothing booked'}
+            </SelectedDayCount>
           </SelectedDayPanel>
-          {selectedEntries.length === 0 ? (
-            <EmptyState style={{ padding: '1.25rem' }}>No preferred shoot on this day.</EmptyState>
+
+          {selectedShoots.length === 0 && selectedFormats.length === 0 ? (
+            <EmptyState style={{ padding: '1.25rem' }}>
+              No shoot requirements or live formats on this day.
+            </EmptyState>
           ) : (
-            selectedEntries.map((entry, index) => {
-              const length = dayLengthLabel(entry.day_length);
-              const cost =
-                entry.applied_rate != null
-                  ? formatCurrency(entry.applied_rate, entry.applied_currency || 'GBP', locale)
-                  : null;
-              return (
-                <EntryCard key={entry.id}>
-                  <EntryTitle>
-                    Shoot {selectedEntries.length > 1 ? `${index + 1}` : ''}
-                    {length ? ` · ${length}` : ''}
-                    {entry.city ? ` · ${entry.city}` : ''}
-                  </EntryTitle>
-                  <EntryMeta>
-                    <dt>Day length</dt>
-                    <dd>{length || '—'}</dd>
-                    <dt>City</dt>
-                    <dd>{entry.city || '—'}</dd>
-                    <dt>Preferred date</dt>
-                    <dd>{formatDate(entry.shoot_date, locale)}</dd>
-                    <dt>Cost</dt>
-                    <dd>{cost || '—'}</dd>
-                    {entry.format && entry.format !== 'Shoot' && (
-                      <>
-                        <dt>Format</dt>
-                        <dd>{entry.format}</dd>
-                      </>
-                    )}
-                    {(entry.live_start || entry.live_end) && (
-                      <>
-                        <dt>Live dates</dt>
-                        <dd>
-                          {entry.live_start ? formatDate(entry.live_start, locale) : '—'}
-                          {' → '}
-                          {entry.live_end ? formatDate(entry.live_end, locale) : '—'}
-                        </dd>
-                      </>
-                    )}
-                    {entry.notes && (
-                      <>
-                        <dt>Notes</dt>
-                        <dd>{entry.notes}</dd>
-                      </>
-                    )}
-                  </EntryMeta>
-                </EntryCard>
-              );
-            })
+            <>
+              {selectedShoots.length > 0 && (
+                <>
+                  <DayGroupTitle>Shoot requirements</DayGroupTitle>
+                  {selectedShoots.map((entry) => {
+                    const who = scheduleAddedByMeta(entry);
+                    const length =
+                      Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
+                    return (
+                      <FormatCard key={entry.id || `shoot-${entry.shoot_date}-${entry.city}`} $soft="#F8EDE8">
+                        <FormatCardMain>
+                          <FormatCardTitle $text="#B45A3C">
+                            <FormatDot $color={SHOOT_DAY_COLOR} />
+                            Shoot · {length}
+                            {entry.city ? ` · ${entry.city}` : ''}
+                          </FormatCardTitle>
+                          <FormatCardMeta>
+                            Preferred date: {formatLiveDate(entry.shoot_date, locale)}
+                            {who.name ? ` · Added by ${who.name}` : ''}
+                          </FormatCardMeta>
+                        </FormatCardMain>
+                        <CardBadgeRow>
+                          <Badge $tone={who.tone}>{who.label}</Badge>
+                          {!readOnly && onRemove && entry.id && (
+                            <RemoveIconButton
+                              onClick={() => onRemove(entry.id)}
+                              title="Remove shoot requirement"
+                            />
+                          )}
+                        </CardBadgeRow>
+                      </FormatCard>
+                    );
+                  })}
+                </>
+              )}
+
+              {selectedFormats.length > 0 && (
+                <>
+                  <DayGroupTitle>Live formats</DayGroupTitle>
+                  {selectedFormats.map((entry) => {
+                    const color = colorForLiveEntry(entry, liveFormats);
+                    return (
+                      <FormatCard
+                        key={entry.id || `${entry.format}-${entry.live_start}`}
+                        $soft={color.soft}
+                      >
+                        <FormatCardMain>
+                          <FormatCardTitle $text={color.text}>
+                            <FormatDot $color={color.bar} />
+                            {entry.format}
+                          </FormatCardTitle>
+                          <FormatCardMeta>
+                            Live: {formatLiveDate(entry.live_start, locale)} →{' '}
+                            {formatLiveDate(entry.live_end, locale)}
+                          </FormatCardMeta>
+                        </FormatCardMain>
+                        {!readOnly && onRemove && entry.id && (
+                          <RemoveIconButton
+                            onClick={() => onRemove(entry.id)}
+                            title={`Remove ${entry.format}`}
+                          />
+                        )}
+                      </FormatCard>
+                    );
+                  })}
+                </>
+              )}
+            </>
           )}
         </>
       ) : (
         <EmptyState style={{ padding: '1.5rem' }}>
-          Select a highlighted day to see shoot details.
+          Select a day to see shoot requirements and live formats.
         </EmptyState>
       )}
     </Section>
@@ -511,6 +694,7 @@ export function SitesSection({
   sites = [],
   onAdd,
   onRemove,
+  onRemoveAll,
   readOnly = false,
   fieldDisabled = {},
   fieldHidden = {},
@@ -524,6 +708,7 @@ export function SitesSection({
     reference_url: '',
   });
   const [error, setError] = useState('');
+  const [removingAll, setRemovingAll] = useState(false);
 
   const showToggle = !fieldHidden.mpc_chooses_sites;
   const showSites = !fieldHidden.sites;
@@ -533,6 +718,7 @@ export function SitesSection({
   const avoid = sites.filter((s) => s.type === 'avoid');
   const mpcChooses = values.mpc_chooses_sites !== false;
   const needsSiteInstructions = showSites && !mpcChooses && sites.length === 0;
+  const canEditSites = showSites && !readOnly && !fieldDisabled.sites;
 
   const handleAdd = async () => {
     setError('');
@@ -565,6 +751,28 @@ export function SitesSection({
     }
   };
 
+  const handleRemoveAll = async () => {
+    if (!sites.length) return;
+    if (!window.confirm(`Remove all ${sites.length} site${sites.length === 1 ? '' : 's'}?`)) {
+      return;
+    }
+    setError('');
+    setRemovingAll(true);
+    try {
+      if (onRemoveAll) {
+        await onRemoveAll();
+      } else if (onRemove) {
+        for (const site of sites) {
+          await onRemove(site.id);
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRemovingAll(false);
+    }
+  };
+
   return (
     <Section id={id}>
       <SectionTitle>Sites</SectionTitle>
@@ -593,17 +801,38 @@ export function SitesSection({
 
       {showSites && (
         <div style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ fontSize: '1rem' }}>
-            Must-Shoot Sites
-            {!mpcChooses && <RequiredMark> *</RequiredMark>}
-          </h3>
+          <Row
+            style={{
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '0.35rem',
+            }}
+          >
+            <h3 style={{ fontSize: '1rem', margin: 0 }}>
+              Must-Shoot Sites
+              {!mpcChooses && <RequiredMark> *</RequiredMark>}
+            </h3>
+            {canEditSites && sites.length > 0 && (onRemove || onRemoveAll) && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={handleRemoveAll}
+                loading={removingAll}
+                disabled={removingAll}
+              >
+                Remove all
+              </Button>
+            )}
+          </Row>
           {mustShoot.length === 0 && <EmptyState style={{ padding: '1rem' }}>None yet</EmptyState>}
           {mustShoot.map((site) => (
             <EntryCard key={site.id}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <strong>{site.site_name}</strong>
                 {!readOnly && !fieldDisabled.sites && (
-                  <RemoveIconButton onClick={() => onRemove(site.id)} />
+                  <RemoveIconButton onClick={() => onRemove(site.id)} disabled={removingAll} />
                 )}
               </Row>
               {site.location && (
@@ -627,7 +856,7 @@ export function SitesSection({
               <Row style={{ justifyContent: 'space-between' }}>
                 <strong>{site.site_name}</strong>
                 {!readOnly && !fieldDisabled.sites && (
-                  <RemoveIconButton onClick={() => onRemove(site.id)} />
+                  <RemoveIconButton onClick={() => onRemove(site.id)} disabled={removingAll} />
                 )}
               </Row>
               {site.location && (

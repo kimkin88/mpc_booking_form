@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Modal } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
@@ -23,6 +23,8 @@ const FIELD_META = [
   { key: 'client_notes', label: 'Additional notes' },
   { key: 'internal_notes', label: 'Internal notes' },
 ];
+
+const PARSEABLE_EXT = /\.(xlsx|xls|csv)$/i;
 
 const Drop = styled.label`
   display: flex;
@@ -101,9 +103,7 @@ const FieldRow = styled.label`
   }
 
   span.value {
-    color: ${({ theme }) => theme.colors.text};
     word-break: break-word;
-    white-space: pre-wrap;
   }
 `;
 
@@ -114,28 +114,35 @@ const Options = styled.div`
   font-size: ${({ theme }) => theme.fontSizes.sm};
 `;
 
-const DateChips = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin: 0.35rem 0 0.75rem;
-`;
-
-const DateChip = styled.span`
-  display: inline-flex;
-  padding: 0.2rem 0.5rem;
-  border-radius: ${({ theme }) => theme.radii.sm};
-  background: ${({ theme }) => theme.colors.bgMuted};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  font-size: ${({ theme }) => theme.fontSizes.xs};
-  color: ${({ theme }) => theme.colors.text};
-`;
-
 const Check = styled.label`
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   cursor: pointer;
+`;
+
+const DocList = styled.div`
+  display: grid;
+  gap: ${({ theme }) => theme.space[2]};
+  margin-bottom: ${({ theme }) => theme.space[3]};
+  max-height: 12rem;
+  overflow: auto;
+`;
+
+const DocRow = styled.label`
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
+  cursor: pointer;
+  background: ${({ theme }) => theme.colors.surface};
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bgMuted};
+  }
 `;
 
 function displayValue(key, value, currency = 'GBP') {
@@ -152,12 +159,89 @@ function hasValue(value) {
   return true;
 }
 
+function isParseableFile(file) {
+  const name = file?.original_filename || file?.name || '';
+  return PARSEABLE_EXT.test(name);
+}
+
+function siteKey(site) {
+  return `${(site.site_name || '').trim().toLowerCase()}|${(site.location || '').trim().toLowerCase()}`;
+}
+
+function mergeParsedResults(results) {
+  if (!results.length) return null;
+  const fields = {};
+  const sites = [];
+  const scheduleSuggestions = [];
+  const siteSeen = new Set();
+  const scheduleSeen = new Set();
+  const warnings = [];
+  let documentType = 'unknown';
+  let selectedSheet = null;
+  let availableSheets = [];
+  let aiUsed = false;
+  const sourceNames = [];
+
+  for (const data of results) {
+    if (data.sourceFilename) sourceNames.push(data.sourceFilename);
+    if (data.aiUsed) aiUsed = true;
+    if (data.documentType && data.documentType !== 'unknown') documentType = data.documentType;
+    if (data.selectedSheet) selectedSheet = data.selectedSheet;
+    if (data.availableSheets?.length && !availableSheets.length) {
+      availableSheets = data.availableSheets;
+    }
+    for (const key of Object.keys(data.fields || {})) {
+      if (hasValue(data.fields[key]) && !hasValue(fields[key])) {
+        fields[key] = data.fields[key];
+      }
+    }
+    for (const site of data.sites || []) {
+      const key = siteKey(site);
+      if (!key.startsWith('|') && siteSeen.has(key)) continue;
+      if (key !== '|') siteSeen.add(key);
+      sites.push(site);
+    }
+    for (const entry of data.scheduleSuggestions || []) {
+      const key = `${entry.format}|${entry.live_start || entry.shoot_date}|${entry.live_end || ''}`;
+      if (scheduleSeen.has(key)) continue;
+      scheduleSeen.add(key);
+      scheduleSuggestions.push(entry);
+    }
+    if (data.warnings?.length) warnings.push(...data.warnings);
+  }
+
+  return {
+    documentType,
+    fields,
+    sites,
+    scheduleSuggestions,
+    warnings: [...new Set(warnings)],
+    selectedSheet,
+    availableSheets,
+    aiUsed,
+    openaiConfigured: results.some((r) => r.openaiConfigured),
+    sourceFilename: sourceNames.join(', '),
+    summary: {
+      brand: fields.brand,
+      campaign: fields.campaign_name,
+      city: fields.city_market,
+      dates:
+        fields.campaign_start || fields.campaign_end
+          ? `${fields.campaign_start || '—'} → ${fields.campaign_end || '—'}`
+          : null,
+      format: fields.format_type,
+      calendarFormats: scheduleSuggestions.length,
+    },
+  };
+}
+
 /**
- * Admin dialog: parse Excel media plan / MPC brief and autofill booking fields.
+ * Admin dialog: parse Excel media plan / MPC brief.
  *
- * @param {'fields' | 'full'} mode
- *   fields = only booking scalar fields (new booking)
- *   full = also sites + optional schedule (existing booking)
+ * @param {'fields' | 'full' | 'calendar'} mode
+ *   fields = booking scalar fields
+ *   full = fields + sites
+ *   calendar = live format ranges only (calendar bars)
  */
 export function DocumentImportDialog({
   open,
@@ -165,10 +249,12 @@ export function DocumentImportDialog({
   mode = 'full',
   currentValues = {},
   bookingId = null,
-  existingSchedule = [],
+  existingSchedule: _existingSchedule = [],
+  existingFiles = [],
   onApplyFields,
   onApplied,
 }) {
+  const calendarOnly = mode === 'calendar';
   const { toast } = useToast();
   const inputRef = useRef(null);
   const [parsing, setParsing] = useState(false);
@@ -176,11 +262,18 @@ export function DocumentImportDialog({
   const [parsed, setParsed] = useState(null);
   const [sheetName, setSheetName] = useState('');
   const [file, setFile] = useState(null);
+  const [sourceFileIds, setSourceFileIds] = useState([]);
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [selected, setSelected] = useState({});
   const [overwrite, setOverwrite] = useState(true);
   const [addSites, setAddSites] = useState(true);
-  const [addSchedule, setAddSchedule] = useState(true);
   const [useAi, setUseAi] = useState(false);
+
+  const parseableExisting = useMemo(
+    () => (existingFiles || []).filter((f) => !f.is_removed && isParseableFile(f)),
+    [existingFiles]
+  );
+  const preferExisting = parseableExisting.length > 0;
 
   const reset = () => {
     setParsing(false);
@@ -188,12 +281,19 @@ export function DocumentImportDialog({
     setParsed(null);
     setSheetName('');
     setFile(null);
+    setSourceFileIds([]);
+    setSelectedDocIds(parseableExisting.map((f) => f.id));
     setSelected({});
     setOverwrite(true);
     setAddSites(true);
-    setAddSchedule(true);
     setUseAi(false);
   };
+
+  useEffect(() => {
+    if (open) {
+      setSelectedDocIds(parseableExisting.map((f) => f.id));
+    }
+  }, [open, parseableExisting]);
 
   const close = (next) => {
     if (!next) reset();
@@ -205,30 +305,73 @@ export function DocumentImportDialog({
     return FIELD_META.filter((f) => hasValue(parsed.fields[f.key]));
   }, [parsed]);
 
-  const runParse = async (nextFile, nextSheet) => {
+  const applyParsedPayload = (data) => {
+    setParsed(data);
+    setSheetName(data.selectedSheet || '');
+    const nextSelectedFixed = {};
+    for (const field of FIELD_META) {
+      const incoming = data.fields?.[field.key];
+      if (!hasValue(incoming)) continue;
+      if (field.key === 'budget' && Number(incoming) > MAX_SHOOT_BUDGET) continue;
+      nextSelectedFixed[field.key] = true;
+    }
+    setSelected(nextSelectedFixed);
+  };
+
+  const runParseUpload = async (nextFile, nextSheet, aiFlag = useAi) => {
     if (!nextFile) return;
     setParsing(true);
     try {
       const body = new FormData();
       body.append('file', nextFile);
       if (nextSheet) body.append('sheetName', nextSheet);
-      body.append('useAi', useAi ? '1' : '0');
+      body.append('useAi', aiFlag ? '1' : '0');
       const data = await api.upload('/api/bookings/parse-document', body);
-      setParsed(data);
-      setSheetName(data.selectedSheet || '');
-      setAddSchedule(!!data.scheduleSuggestions?.length);
-      const nextSelectedFixed = {};
-      for (const field of FIELD_META) {
-        const incoming = data.fields?.[field.key];
-        if (!hasValue(incoming)) continue;
-        if (field.key === 'budget' && Number(incoming) > MAX_SHOOT_BUDGET) continue;
-        // Always pre-check mapped form fields so Apply fills them
-        nextSelectedFixed[field.key] = true;
-      }
-      setSelected(nextSelectedFixed);
+      setFile(nextFile);
+      setSourceFileIds([]);
+      applyParsedPayload(data);
       const via = data.aiUsed ? ' (AI)' : '';
+      const formats = data.scheduleSuggestions?.length || 0;
       toast(
-        `Parsed ${data.documentType === 'media_plan' ? 'media plan' : 'MPC brief'}${via} · ${data.scheduleSuggestions?.length || 0} calendar days`
+        calendarOnly
+          ? `Parsed ${formats} live format${formats === 1 ? '' : 's'} for calendar${via}`
+          : `Parsed ${data.documentType === 'media_plan' ? 'media plan' : 'MPC brief'}${via} · ${data.sites?.length || 0} sites`
+      );
+    } catch (err) {
+      toast(err.message, { variant: 'error' });
+      setParsed(null);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const runParseExisting = async (ids, nextSheet = null, aiFlag = useAi) => {
+    const list = (ids || []).filter(Boolean);
+    if (!list.length) {
+      toast('Select at least one spreadsheet', { variant: 'warning' });
+      return;
+    }
+    setParsing(true);
+    try {
+      const results = [];
+      for (const id of list) {
+        const body = new FormData();
+        body.append('fileId', id);
+        if (nextSheet && list.length === 1) body.append('sheetName', nextSheet);
+        body.append('useAi', aiFlag ? '1' : '0');
+        const data = await api.upload('/api/bookings/parse-document', body);
+        results.push(data);
+      }
+      const merged = mergeParsedResults(results);
+      setFile(null);
+      setSourceFileIds(list);
+      applyParsedPayload(merged);
+      const via = merged.aiUsed ? ' (AI)' : '';
+      const formats = merged.scheduleSuggestions?.length || 0;
+      toast(
+        calendarOnly
+          ? `Parsed ${formats} live format${formats === 1 ? '' : 's'} for calendar${via}`
+          : `Parsed ${list.length} doc${list.length === 1 ? '' : 's'}${via} · ${merged.sites?.length || 0} sites`
       );
     } catch (err) {
       toast(err.message, { variant: 'error' });
@@ -242,23 +385,71 @@ export function DocumentImportDialog({
     const next = e.target.files?.[0];
     e.target.value = '';
     if (!next) return;
-    setFile(next);
-    await runParse(next, null);
+    await runParseUpload(next, null);
   };
 
   const onSheetChange = async (name) => {
     setSheetName(name);
-    if (file) await runParse(file, name);
+    if (file) await runParseUpload(file, name);
+    else if (sourceFileIds.length === 1) await runParseExisting(sourceFileIds, name);
   };
 
   const toggleField = (key) => {
     setSelected((s) => ({ ...s, [key]: !s[key] }));
   };
 
+  const toggleDoc = (id) => {
+    setSelectedDocIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const apply = async () => {
     if (!parsed) return;
     setApplying(true);
     try {
+      if (calendarOnly) {
+        if (!bookingId) {
+          toast('Save the booking before importing calendar dates', { variant: 'error' });
+          return;
+        }
+        const formats = parsed.scheduleSuggestions || [];
+        if (!formats.length) {
+          toast('No live format dates found in the document', { variant: 'warning' });
+          return;
+        }
+
+        await api.delete(`/api/bookings/${bookingId}/schedule`, { removeLiveFormats: true });
+
+        let scheduleAdded = 0;
+        for (const entry of formats) {
+          try {
+            await api.post(`/api/bookings/${bookingId}/schedule`, {
+              shoot_date: entry.shoot_date || entry.live_start,
+              live_start: entry.live_start || entry.shoot_date,
+              live_end: entry.live_end || entry.live_start || entry.shoot_date,
+              format: entry.format || 'Format',
+              city: entry.city || null,
+              day_length: null,
+              notes: entry.notes || null,
+              kind: 'live_format',
+            });
+            scheduleAdded += 1;
+          } catch (err) {
+            toast(err.message || 'Could not add calendar format', { variant: 'warning' });
+          }
+        }
+
+        toast(
+          scheduleAdded
+            ? `Added ${scheduleAdded} live format${scheduleAdded === 1 ? '' : 's'} to calendar`
+            : 'Nothing added to calendar'
+        );
+        await onApplied?.({ patch: {}, sitesAdded: 0, scheduleAdded, parsed });
+        close(false);
+        return;
+      }
+
       const patch = {};
       for (const field of FIELD_META) {
         if (!selected[field.key]) continue;
@@ -271,7 +462,6 @@ export function DocumentImportDialog({
         patch[field.key] = incoming;
       }
 
-      // Force-apply core booking fields from the parse even if checkbox state drifted
       const coreKeys = [
         'brand',
         'campaign_name',
@@ -294,7 +484,6 @@ export function DocumentImportDialog({
       }
 
       let sitesAdded = 0;
-      let scheduleAdded = 0;
 
       if (mode === 'full' && bookingId && addSites && parsed.sites?.length) {
         for (const site of parsed.sites) {
@@ -313,57 +502,12 @@ export function DocumentImportDialog({
         }
       }
 
-      if (mode === 'full' && bookingId && addSchedule && parsed.scheduleSuggestions?.length) {
-        const existingKeys = new Set(
-          (existingSchedule || []).map(
-            (e) =>
-              `${String(e.shoot_date).slice(0, 10)}|${e.city || ''}|${Number(e.day_length)}`
-          )
-        );
-        let skippedDup = 0;
-        let skippedBudget = 0;
-        for (const entry of parsed.scheduleSuggestions) {
-          const key = `${entry.shoot_date}|${entry.city || ''}|${Number(entry.day_length)}`;
-          if (existingKeys.has(key)) {
-            skippedDup += 1;
-            continue;
-          }
-          try {
-            await api.post(`/api/bookings/${bookingId}/schedule`, {
-              shoot_date: entry.shoot_date,
-              day_length: entry.day_length ?? 1,
-              city: entry.city || 'Other',
-              notes: entry.notes || null,
-              format: entry.format || 'Shoot',
-            });
-            existingKeys.add(key);
-            scheduleAdded += 1;
-          } catch (err) {
-            if (err.message?.includes('budget') || err.code === 'BUDGET_EXCEEDED') {
-              skippedBudget += 1;
-            } else {
-              toast(err.message || 'Could not add shoot day', { variant: 'warning' });
-            }
-          }
-        }
-        if (skippedBudget) {
-          toast(
-            `${skippedBudget} shoot day(s) skipped — would exceed remaining shoot budget`,
-            { variant: 'warning' }
-          );
-        }
-        if (skippedDup && !scheduleAdded) {
-          toast('Those calendar days were already on the schedule', { variant: 'info' });
-        }
-      }
-
       const bits = [];
       if (Object.keys(patch).length) bits.push(`${Object.keys(patch).length} fields`);
       if (sitesAdded) bits.push(`${sitesAdded} sites`);
-      if (scheduleAdded) bits.push(`${scheduleAdded} calendar day${scheduleAdded === 1 ? '' : 's'}`);
       toast(bits.length ? `Imported ${bits.join(', ')}` : 'Nothing selected to import');
 
-      await onApplied?.({ patch, sitesAdded, scheduleAdded, parsed });
+      await onApplied?.({ patch, sitesAdded, scheduleAdded: 0, parsed });
       close(false);
     } catch (err) {
       toast(err.message, { variant: 'error' });
@@ -377,24 +521,88 @@ export function DocumentImportDialog({
     label: s.city ? `${s.name} — ${s.city}` : s.name,
   }));
 
+  const canChangeSheet =
+    sheetOptions.length > 1 && (file || sourceFileIds.length === 1);
+
   return (
     <Modal
       open={open}
       onOpenChange={close}
       size="lg"
-      title="Import from document"
-      description="Upload an OOH media plan or MPC brief (.xlsx). Fields, sites, and calendar shoot days are mapped for review before applying."
+      title={calendarOnly ? 'Import live dates to calendar' : 'Autofill from documents'}
+      description={
+        calendarOnly
+          ? preferExisting
+            ? 'Select uploaded Media Plan spreadsheets to fill the calendar with format live date ranges (coloured bars). Booking fields and sites are not changed.'
+            : 'Upload an OOH media plan (.xlsx) to fill the calendar with format live date ranges. Booking fields and sites are not changed.'
+          : preferExisting
+            ? 'Select uploaded Media Plan spreadsheets (.xlsx / .xls / .csv) to extract booking fields and sites. Shoot requirements stay manual.'
+            : 'Upload an OOH media plan or MPC brief (.xlsx). Fields and sites are mapped for review before applying. Shoot requirements are added manually.'
+      }
       footer={
         <>
           <Button variant="secondary" onClick={() => close(false)} disabled={applying}>
             Cancel
           </Button>
-          <Button onClick={apply} loading={applying} disabled={!parsed || parsing || applying}>
-            {applying ? 'Applying…' : 'Apply to form & calendar'}
+          <Button
+            onClick={apply}
+            loading={applying}
+            disabled={
+              !parsed ||
+              parsing ||
+              applying ||
+              (calendarOnly && !(parsed?.scheduleSuggestions?.length > 0))
+            }
+          >
+            {applying
+              ? 'Applying…'
+              : calendarOnly
+                ? 'Apply to calendar'
+                : 'Apply to form'}
           </Button>
         </>
       }
     >
+      {preferExisting && (
+        <>
+          <div style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+            <strong>Uploaded documents</strong>
+          </div>
+          <DocList>
+            {parseableExisting.map((doc) => (
+              <DocRow key={doc.id}>
+                <input
+                  type="checkbox"
+                  checked={selectedDocIds.includes(doc.id)}
+                  onChange={() => toggleDoc(doc.id)}
+                  disabled={parsing || applying}
+                />
+                <span>{doc.original_filename || 'Document'}</span>
+              </DocRow>
+            ))}
+          </DocList>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => runParseExisting(selectedDocIds)}
+            loading={parsing && !file}
+            disabled={parsing || applying || !selectedDocIds.length}
+            style={{ marginBottom: '1rem' }}
+          >
+            {parsing && !file ? 'Parsing…' : 'Parse selected'}
+          </Button>
+          <div
+            style={{
+              fontSize: '0.8rem',
+              opacity: 0.8,
+              marginBottom: '0.75rem',
+            }}
+          >
+            Or upload a different spreadsheet:
+          </div>
+        </>
+      )}
+
       <Drop>
         <input
           ref={inputRef}
@@ -403,7 +611,15 @@ export function DocumentImportDialog({
           onChange={onFile}
           disabled={parsing || applying}
         />
-        <strong>{parsing ? 'Parsing…' : file ? file.name : 'Choose Excel file'}</strong>
+        <strong>
+          {parsing && file
+            ? 'Parsing…'
+            : file
+              ? file.name
+              : preferExisting
+                ? 'Choose another Excel file'
+                : 'Choose Excel file'}
+        </strong>
         <span>Media plan (CLIENT / CAMPAIGN NAME) or MPC brief (KPI / sites)</span>
       </Drop>
 
@@ -415,37 +631,13 @@ export function DocumentImportDialog({
             onChange={async (e) => {
               const on = e.target.checked;
               setUseAi(on);
-              if (file) {
-                // Re-parse with the new AI setting
-                setParsing(true);
-                try {
-                  const body = new FormData();
-                  body.append('file', file);
-                  if (sheetName) body.append('sheetName', sheetName);
-                  body.append('useAi', on ? '1' : '0');
-                  const data = await api.upload('/api/bookings/parse-document', body);
-                  setParsed(data);
-                  setSheetName(data.selectedSheet || '');
-                  setAddSchedule(!!data.scheduleSuggestions?.length);
-                  const nextSelected = {};
-                  for (const field of FIELD_META) {
-                    const incoming = data.fields?.[field.key];
-                    if (!hasValue(incoming)) continue;
-                    const existing = currentValues?.[field.key];
-                    nextSelected[field.key] = overwrite || !hasValue(existing);
-                  }
-                  setSelected(nextSelected);
-                } catch (err) {
-                  toast(err.message, { variant: 'error' });
-                } finally {
-                  setParsing(false);
-                }
-              }
+              if (file) await runParseUpload(file, sheetName || null, on);
+              else if (sourceFileIds.length) await runParseExisting(sourceFileIds, sheetName || null, on);
             }}
             disabled={parsing || applying}
           />
           <span>
-            Use OpenAI for smarter field + calendar extraction
+            Use OpenAI for smarter field extraction
             {parsed && parsed.openaiConfigured === false
               ? ' (add OPENAI_API_KEY to .env.local)'
               : parsed?.aiUsed
@@ -457,7 +649,7 @@ export function DocumentImportDialog({
 
       {parsed && (
         <>
-          {sheetOptions.length > 1 && (
+          {canChangeSheet && (
             <div style={{ marginTop: '1rem' }}>
               <Select
                 label="Market sheet"
@@ -475,42 +667,50 @@ export function DocumentImportDialog({
               {parsed.documentType === 'media_plan' ? 'OOH media plan' : 'MPC brief'}
               {parsed.selectedSheet ? ` · ${parsed.selectedSheet}` : ''}
               {parsed.aiUsed ? ' · AI enriched' : ''}
+              {parsed.sourceFilename ? ` · ${parsed.sourceFilename}` : ''}
             </div>
-            {parsed.summary?.brand && (
+            {calendarOnly ? (
               <div>
-                <strong>Brand:</strong> {parsed.summary.brand}
-                {parsed.summary.campaign ? ` · ${parsed.summary.campaign}` : ''}
+                <strong>Live formats for calendar:</strong>{' '}
+                {parsed.scheduleSuggestions?.length || 0}
               </div>
+            ) : (
+              <>
+                {parsed.summary?.brand && (
+                  <div>
+                    <strong>Brand:</strong> {parsed.summary.brand}
+                    {parsed.summary.campaign ? ` · ${parsed.summary.campaign}` : ''}
+                  </div>
+                )}
+                {parsed.summary?.city && (
+                  <div>
+                    <strong>City:</strong> {parsed.summary.city}
+                    {parsed.summary.dates ? ` · ${parsed.summary.dates}` : ''}
+                  </div>
+                )}
+                <div>
+                  <strong>Sites:</strong> {parsed.sites?.length || 0}
+                  {parsed.summary?.format ? ` · Format ${parsed.summary.format}` : ''}
+                </div>
+              </>
             )}
-            {parsed.summary?.city && (
-              <div>
-                <strong>City:</strong> {parsed.summary.city}
-                {parsed.summary.dates ? ` · ${parsed.summary.dates}` : ''}
-              </div>
-            )}
-            <div>
-              <strong>Sites:</strong> {parsed.sites?.length || 0}
-              {' · '}
-              <strong>Calendar days:</strong> {parsed.scheduleSuggestions?.length || 0}
-              {parsed.summary?.format ? ` · Format ${parsed.summary.format}` : ''}
-            </div>
           </Summary>
 
-          {!!parsed.scheduleSuggestions?.length && (
-            <>
-              <div style={{ fontSize: '0.875rem', color: 'inherit' }}>
-                <strong>Calendar shoot days</strong>
-              </div>
-              <DateChips>
-                {parsed.scheduleSuggestions.map((e) => (
-                  <DateChip key={`${e.shoot_date}-${e.city}-${e.day_length}`}>
-                    {e.shoot_date}
-                    {e.city ? ` · ${e.city}` : ''}
-                    {Number(e.day_length) === 0.5 ? ' · ½ day' : ''}
-                  </DateChip>
-                ))}
-              </DateChips>
-            </>
+          {calendarOnly && !!parsed.scheduleSuggestions?.length && (
+            <FieldList>
+              {parsed.scheduleSuggestions.map((entry) => (
+                <FieldRow
+                  key={`${entry.format}-${entry.live_start}-${entry.live_end}`}
+                  as="div"
+                  style={{ cursor: 'default', gridTemplateColumns: '9rem 1fr' }}
+                >
+                  <span className="label">{entry.format}</span>
+                  <span className="value">
+                    {entry.live_start} → {entry.live_end}
+                  </span>
+                </FieldRow>
+              ))}
+            </FieldList>
           )}
 
           {!!parsed.warnings?.length && (
@@ -521,6 +721,8 @@ export function DocumentImportDialog({
             </WarnList>
           )}
 
+          {!calendarOnly && (
+            <>
           <FieldList>
             {availableFields.map((field) => {
               const value = displayValue(
@@ -528,26 +730,21 @@ export function DocumentImportDialog({
                 parsed.fields[field.key],
                 parsed.fields.currency || 'GBP'
               );
-              const existing = currentValues?.[field.key];
-              const blocked = !overwrite && hasValue(existing);
               return (
-                <FieldRow key={field.key} data-disabled={blocked ? 'true' : 'false'}>
+                <FieldRow key={field.key} data-disabled={applying ? 'true' : undefined}>
                   <input
                     type="checkbox"
-                    checked={!!selected[field.key] && !blocked}
-                    disabled={blocked || applying}
+                    checked={!!selected[field.key]}
                     onChange={() => toggleField(field.key)}
+                    disabled={applying}
                   />
                   <span className="label">{field.label}</span>
-                  <span className="value">
-                    {value}
-                    {blocked ? ' (already set — enable overwrite)' : ''}
-                  </span>
+                  <span className="value">{value}</span>
                 </FieldRow>
               );
             })}
             {!availableFields.length && (
-              <span style={{ fontSize: '0.875rem' }}>No scalar fields detected.</span>
+              <div style={{ fontSize: '0.875rem', opacity: 0.8 }}>No mapped fields found.</div>
             )}
           </FieldList>
 
@@ -574,35 +771,22 @@ export function DocumentImportDialog({
             </Check>
 
             {mode === 'full' && (
-              <>
-                <Check>
-                  <input
-                    type="checkbox"
-                    checked={addSites}
-                    disabled={!parsed.sites?.length}
-                    onChange={(e) => setAddSites(e.target.checked)}
-                  />
-                  <span>
-                    Add {parsed.sites?.length || 0} sites as must-shoot
-                    {!parsed.sites?.length ? ' (none found)' : ''}
-                  </span>
-                </Check>
-                <Check>
-                  <input
-                    type="checkbox"
-                    checked={addSchedule}
-                    disabled={!parsed.scheduleSuggestions?.length}
-                    onChange={(e) => setAddSchedule(e.target.checked)}
-                  />
-                  <span>
-                    Update calendar with {parsed.scheduleSuggestions?.length || 0} shoot day
-                    {(parsed.scheduleSuggestions?.length || 0) === 1 ? '' : 's'}
-                    {!parsed.scheduleSuggestions?.length ? ' (none found)' : ''}
-                  </span>
-                </Check>
-              </>
+              <Check>
+                <input
+                  type="checkbox"
+                  checked={addSites}
+                  disabled={!parsed.sites?.length}
+                  onChange={(e) => setAddSites(e.target.checked)}
+                />
+                <span>
+                  Add {parsed.sites?.length || 0} sites as must-shoot
+                  {!parsed.sites?.length ? ' (none found)' : ''}
+                </span>
+              </Check>
             )}
           </Options>
+            </>
+          )}
         </>
       )}
     </Modal>

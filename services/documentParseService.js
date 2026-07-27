@@ -2,12 +2,18 @@
  * Parse media-plan / MPC brief Excel documents into booking autofill payloads.
  *
  * Supported shapes (from production examples):
- * 1. Label/value media plan (CLIENT / CAMPAIGN NAME / MARKET table) — e.g. Keely OOH
- * 2. Multi-market brief sheets (KPI / Environment / Site/Network Name) — e.g. Nike RTP
+ * 1. Label/value media plan (CLIENT / CAMPAIGN NAME / MARKET + START/END) — e.g. Keely OOH
+ *    Calendar: one live bar per PLACEMENT (START→END). FORMAT codes are not collapsed.
+ * 2. Multi-market brief sheets (KPI / Environment / Site/Network Name + period cols) — e.g. Nike RTP
+ *    Calendar: one live bar per Site/Network Name.
+ *    Live window = comment date text (e.g. "19th July - 28th July") if present,
+ *    else union of period columns that contain a media cost.
+ *    Shoot-day rows are never generated from import (calendar-only).
  */
 
 import { read as xlsxRead, utils as xlsxUtils } from 'xlsx';
 import { MARKET_CITIES } from '@/lib/rateCard';
+import { normalizeFormatLabel } from '@/lib/calendarFormats';
 
 const MAX_SITES = 80;
 const MAX_BYTES = 15 * 1024 * 1024;
@@ -333,6 +339,96 @@ function buildScheduleFromDates(dates, { city, notesPrefix = 'From document' } =
   }));
 }
 
+/**
+ * Merge media-plan / brief live date rows into calendar format ranges.
+ * Same label + overlapping/adjacent windows are merged; different placements stay separate.
+ */
+function buildCalendarFormatsFromRows(rows, { city } = {}) {
+  const byFormat = new Map();
+
+  for (const row of rows || []) {
+    const format = clean(row.format) || clean(row.placement) || 'Format';
+    const live_start = row.live_start || row.start;
+    const live_end = row.live_end || row.end || live_start;
+    if (!live_start) continue;
+    const end = live_end && live_end >= live_start ? live_end : live_start;
+    if (!byFormat.has(format)) byFormat.set(format, []);
+    byFormat.get(format).push({ start: live_start, end });
+  }
+
+  const formats = [];
+  for (const [format, ranges] of byFormat) {
+    ranges.sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+    const merged = [];
+    for (const range of ranges) {
+      const prev = merged[merged.length - 1];
+      if (!prev) {
+        merged.push({ ...range });
+        continue;
+      }
+      const prevEndNext = (() => {
+        const d = new Date(`${prev.end}T12:00:00`);
+        d.setDate(d.getDate() + 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      })();
+      if (range.start <= prev.end || range.start <= prevEndNext) {
+        if (range.end > prev.end) prev.end = range.end;
+      } else {
+        merged.push({ ...range });
+      }
+    }
+    for (const range of merged) {
+      formats.push({
+        shoot_date: range.start,
+        live_start: range.start,
+        live_end: range.end,
+        format,
+        city: resolveShootCity(city, [city]),
+        day_length: null,
+        notes: `Live ${range.start} → ${range.end}`,
+        kind: 'live_format',
+      });
+    }
+  }
+
+  formats.sort((a, b) => a.live_start.localeCompare(b.live_start) || a.format.localeCompare(b.format));
+  return formats.slice(0, 80);
+}
+
+/** Prefer an explicit comment date window; else union of booked period columns. */
+function liveRangeFromBriefRow(row, dateCols, yearHint) {
+  for (const cell of row || []) {
+    if (cell instanceof Date || typeof cell === 'number') continue;
+    const text = clean(cell);
+    if (!looksLikeDateText(text)) continue;
+    // Skip period headers accidentally read from a sub-header row
+    if (isPeriodHeader(text) && !/\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+/i.test(text)) continue;
+    const range = parseDateRangeText(text, yearHint);
+    if (range.start && range.end) {
+      return { live_start: range.start, live_end: range.end, source: 'comment' };
+    }
+    if (range.start) {
+      return { live_start: range.start, live_end: range.start, source: 'comment' };
+    }
+  }
+
+  let start = null;
+  let end = null;
+  for (const dc of dateCols) {
+    const money = parseMoney(row[dc.idx]);
+    if (money == null || money <= 0) continue;
+    if (!dc.start) continue;
+    if (!start || dc.start < start) start = dc.start;
+    const dcEnd = dc.end || dc.start;
+    if (!end || dcEnd > end) end = dcEnd;
+  }
+  if (start) return { live_start: start, live_end: end || start, source: 'period' };
+  return null;
+}
+
 /** Expand inclusive date range into daily dates (capped). */
 function expandDateRange(start, end, maxDays = 14) {
   if (!start) return [];
@@ -446,6 +542,8 @@ function parseMediaPlanSheet(rows, { filename } = {}) {
   const markets = new Set();
   const yearHint = inferYearFromRows(rows);
 
+  const liveFormatRows = [];
+
   if (header) {
     const col = header.map;
     const startIdx =
@@ -480,6 +578,17 @@ function parseMediaPlanSheet(rows, { filename } = {}) {
       const end = toDateOnly(row[endCol]);
       if (start) liveStartDates.push(start);
       if (end) liveEndDates.push(end);
+
+      if (start) {
+        // Calendar bars = one lane per placement (not collapsed FORMAT code like D6)
+        const label = clean(placement) || normalizeFormatLabel(format, placement);
+        liveFormatRows.push({
+          format: label,
+          placement,
+          live_start: start,
+          live_end: end || start,
+        });
+      }
 
       // Prefer named placements; include partner so packages are distinguishable
       const siteName = partner && placement ? `${partner.trim()} — ${placement}` : placement || location;
@@ -568,21 +677,14 @@ function parseMediaPlanSheet(rows, { filename } = {}) {
     internal_notes: null,
   };
 
-  // Calendar shoot days = unique live starts in the campaign year (+ short range expand)
-  const campaignYear = (campaign_start || liveStartDates[0] || '').slice(0, 4);
-  const scheduleDates = liveStartDates.filter((d) => !campaignYear || d.startsWith(campaignYear));
-  if (campaign_start && campaign_end) {
-    const spanDays =
-      (Date.parse(`${campaign_end}T12:00:00`) - Date.parse(`${campaign_start}T12:00:00`)) /
-      86400000;
-    if (Number.isFinite(spanDays) && spanDays >= 0 && spanDays <= 14) {
-      scheduleDates.push(...expandDateRange(campaign_start, campaign_end));
-    }
-  }
-  const scheduleSuggestions = buildScheduleFromDates(scheduleDates, {
+  // Calendar = merged format live ranges (bars), not shoot requirement days
+  const scheduleSuggestions = buildCalendarFormatsFromRows(liveFormatRows, {
     city: cityList[0] || city_market,
-    notesPrefix: 'Preferred shoot date from media plan',
   });
+  if (!scheduleSuggestions.length && liveStartDates.length) {
+    // Fallback: one range per unique live start/end pair from campaign window
+    warnings.push('No per-format live dates found — calendar may be incomplete');
+  }
 
   return {
     documentType: 'media_plan',
@@ -602,6 +704,7 @@ function parseMediaPlanSheet(rows, { filename } = {}) {
       sites: sites.length,
       format: fields.format_type,
       scheduleDays: scheduleSuggestions.length,
+      calendarFormats: scheduleSuggestions.length,
     },
   };
 }
@@ -650,6 +753,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
   const header = findHeaderRow(rows, ['kpi', 'environment']);
   const warnings = [];
   const sites = [];
+  const liveFormatRows = [];
   const formatTokens = [];
   const bookedLiveStarts = [];
   const commentDates = [];
@@ -657,6 +761,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
   let siteNameCol = null;
   let envCol = null;
   let kpiCol = null;
+  let formatTypeCol = null;
   let dateCols = [];
 
   if (!header) {
@@ -666,6 +771,10 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
     const headerRow = rows[header.index] || [];
     kpiCol = map.kpi;
     envCol = map.environment;
+    formatTypeCol =
+      map['format type'] ??
+      Object.entries(map).find(([k]) => k.includes('format') && k.includes('type'))?.[1] ??
+      null;
     siteNameCol =
       map['site network name'] ??
       map['site name'] ??
@@ -673,12 +782,11 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
       Object.entries(map).find(([k]) => k.includes('site') && k.includes('name'))?.[1] ??
       null;
 
-    const skipCostCols = new Set();
     headerRow.forEach((cell, idx) => {
       const label = clean(cell);
       const key = normalizeKey(cell);
       if (/impact|address|anbieter|format type|availability|impression/i.test(key)) {
-        skipCostCols.add(idx);
+        return;
       }
       if (isPeriodHeader(label)) {
         const range = parseDateRangeText(label, yearHint);
@@ -693,6 +801,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
       if (cellStr(row, kpiCol)) currentKpi = cellStr(row, kpiCol);
       const env = cellStr(row, envCol);
       const siteName = siteNameCol != null ? cellStr(row, siteNameCol) : '';
+      const formatType = formatTypeCol != null ? cellStr(row, formatTypeCol) : '';
 
       if (/^fees$/i.test(kpi) || /^emily update/i.test(env) || /total$/i.test(siteName)) {
         if (/total$/i.test(siteName)) break;
@@ -701,39 +810,35 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
       if (!siteName) continue;
       if (/^environment$/i.test(env) && /^site/i.test(siteName)) continue;
       if (/available but not needed/i.test(siteName)) continue;
+      if (/replacement pending/i.test(siteName)) continue;
 
-      formatTokens.push(kpi, env, siteName);
+      formatTokens.push(kpi, env, siteName, formatType);
 
       let rowCost = null;
-      let rowLiveStart = null;
-      let rowLiveEnd = null;
       for (const dc of dateCols) {
         const money = parseMoney(row[dc.idx]);
         if (money == null || money <= 0) continue;
         rowCost = rowCost == null ? money : Math.max(rowCost, money);
-        if (dc.start) {
-          bookedLiveStarts.push(dc.start);
-          rowLiveStart = rowLiveStart || dc.start;
-        }
-        if (dc.end) rowLiveEnd = dc.end;
+        if (dc.start) bookedLiveStarts.push(dc.start);
+        if (dc.end) bookedLiveStarts.push(dc.end);
       }
 
-      for (let c = 0; c < row.length; c += 1) {
-        if (typeof row[c] === 'number') continue;
-        const text = clean(row[c]);
-        if (!looksLikeDateText(text)) continue;
-        const range = parseDateRangeText(text, yearHint);
-        if (range.start) commentDates.push(range.start);
-        if (range.end) commentDates.push(range.end);
-        if (range.start && range.end) {
-          const span =
-            (Date.parse(`${range.end}T12:00:00`) - Date.parse(`${range.start}T12:00:00`)) /
-            86400000;
-          // Only expand very short windows into daily shoot days
-          if (Number.isFinite(span) && span >= 0 && span <= 3) {
-            commentDates.push(...expandDateRange(range.start, range.end));
-          }
-        }
+      const live = liveRangeFromBriefRow(row, dateCols, yearHint);
+      if (live?.live_start) {
+        commentDates.push(live.live_start);
+        if (live.live_end) commentDates.push(live.live_end);
+        // Calendar lane label = site/network name (e.g. "Digital 6 Sheet (100x)")
+        const label =
+          clean(siteName) ||
+          normalizeFormatLabel(formatType, siteName) ||
+          clean(formatType) ||
+          'Format';
+        liveFormatRows.push({
+          format: label,
+          placement: siteName,
+          live_start: live.live_start,
+          live_end: live.live_end || live.live_start,
+        });
       }
 
       sites.push({
@@ -742,7 +847,8 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
         location: env || metaCityFallback(sheetName),
         notes: [
           kpi || null,
-          rowLiveStart ? `Live from ${rowLiveStart}` : null,
+          formatType || null,
+          live?.live_start ? `Live ${live.live_start} → ${live.live_end || live.live_start}` : null,
           rowCost != null ? `Media cost ~ ${formatMoneyNote(rowCost, SHEET_CURRENCY[sheetName])}` : null,
         ]
           .filter(Boolean)
@@ -757,7 +863,6 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
   bookedLiveStarts.sort();
   commentDates.sort();
 
-  // When no costs/comments, use period header window for campaign dates
   const headerDates = [];
   for (const dc of dateCols) {
     if (dc.start) headerDates.push(dc.start);
@@ -768,13 +873,11 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
   const mediaSum = sites.reduce((acc, s) => acc + (Number(s._cost) > 0 ? Number(s._cost) : 0), 0);
   const mediaTotal = meta.mediaTotal || (mediaSum > 0 ? mediaSum : null);
 
-  const allCampaignDates = (
-    bookedLiveStarts.length || commentDates.length
+  const campaignDateSource =
+    commentDates.length || bookedLiveStarts.length
       ? [...bookedLiveStarts, ...commentDates]
-      : headerDates
-  )
-    .filter(Boolean)
-    .sort();
+      : headerDates;
+  const allCampaignDates = campaignDateSource.filter(Boolean).sort();
   const campaign_start = allCampaignDates[0] || null;
   const campaign_end = allCampaignDates[allCampaignDates.length - 1] || null;
 
@@ -792,7 +895,6 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
     campaign_name: meta.campaign_name,
     city_market: meta.city_market,
     currency: meta.currency || 'GBP',
-    // Never map media buy into photography Budget field
     budget: null,
     campaign_start,
     campaign_end,
@@ -809,20 +911,12 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
     warnings.push('Media buy totals were not copied into Budget (shoot budget stays empty)');
   }
 
-  // Shoot calendar: prefer short comment windows; else unique booked live starts (capped)
-  let scheduleDates = [];
-  if (commentDates.length) {
-    scheduleDates = commentDates;
-  } else if (bookedLiveStarts.length) {
-    scheduleDates = [...new Set(bookedLiveStarts)].slice(0, 5);
-  } else if (campaign_start) {
-    scheduleDates = [campaign_start];
-  }
-
-  const scheduleSuggestions = buildScheduleFromDates(scheduleDates, {
+  const scheduleSuggestions = buildCalendarFormatsFromRows(liveFormatRows, {
     city: fields.city_market,
-    notesPrefix: 'Preferred shoot date from brief',
-  }).slice(0, 8);
+  });
+  if (!scheduleSuggestions.length) {
+    warnings.push('No live date windows found for calendar — check period columns or date comments');
+  }
 
   return {
     documentType: 'mpc_brief',
@@ -845,6 +939,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
       sites: Math.min(sites.length, MAX_SITES),
       format: fields.format_type,
       scheduleDays: scheduleSuggestions.length,
+      calendarFormats: scheduleSuggestions.length,
     },
   };
 }

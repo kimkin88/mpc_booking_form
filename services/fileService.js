@@ -710,6 +710,36 @@ export async function getSignedDownloadUrl(fileId, expiresIn = 3600) {
   return { url: data.signedUrl, file };
 }
 
+/** Download file bytes from storage for server-side parsing. */
+export async function downloadFileBuffer(fileId) {
+  const supabase = createServiceClient();
+  const { data: file, error } = await supabase
+    .from('file_assets')
+    .select('*')
+    .eq('id', fileId)
+    .single();
+
+  if (error) throw error;
+  if (!file || file.is_removed) {
+    const err = new Error('File not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  const { data, error: dlError } = await supabase.storage.from(BUCKET).download(file.storage_key);
+  if (dlError || !data) {
+    throw new Error(dlError?.message || 'Could not download file from storage');
+  }
+
+  const buffer = Buffer.from(await data.arrayBuffer());
+  return {
+    buffer,
+    filename: file.original_filename || 'document.xlsx',
+    mimeType: file.mime_type || '',
+    file,
+  };
+}
+
 export async function listFileVersions(fileId) {
   const supabase = createServiceClient();
   const { data: file } = await supabase.from('file_assets').select('*').eq('id', fileId).single();

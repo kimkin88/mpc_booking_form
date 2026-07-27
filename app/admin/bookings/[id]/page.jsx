@@ -26,6 +26,7 @@ import { FilesSection } from '@/components/files/FilesSection';
 import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalControls, PermissionsPanel } from '@/components/booking/PortalPermissions';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
+import { shootRequirementsFromSchedule } from '@/lib/calendarFormats';
 import { api } from '@/lib/apiClient';
 import {
   BOOKING_STATUSES,
@@ -105,34 +106,6 @@ const RemoteBanner = styled.div`
     font-weight: ${({ theme }) => theme.fontWeights.semibold};
   }
 `;
-
-function ImportIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="1.05rem" height="1.05rem">
-      <path
-        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 2v6h6"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 18v-6M9 15l3 3 3-3"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function LinkIcon() {
   return (
@@ -508,6 +481,7 @@ export default function BookingDetailPage() {
   const [remoteAhead, setRemoteAhead] = useState(false);
   const [activeDetailSection, setActiveDetailSection] = useState(DETAIL_SECTIONS[0].id);
   const [importOpen, setImportOpen] = useState(false);
+  const [importSourceFiles, setImportSourceFiles] = useState([]);
 
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
@@ -813,12 +787,6 @@ export default function BookingDetailPage() {
                   ]}
                   eyebrow={form.sb_number}
                   title={form.campaign_name || form.client_company || 'Untitled booking'}
-                  actions={
-                    <Button variant="accent" onClick={() => setImportOpen(true)}>
-                      <ImportIcon />
-                      Import
-                    </Button>
-                  }
                 />
 
                 <StatusRow>
@@ -866,7 +834,7 @@ export default function BookingDetailPage() {
                     errors={errors}
                     showRateCard
                     showAdminOwnership
-                    scheduleEntries={data.schedule}
+                    scheduleEntries={shootRequirementsFromSchedule(data.schedule)}
                     poFiles={
                       <PoDocumentUploader
                         bookingId={id}
@@ -885,7 +853,7 @@ export default function BookingDetailPage() {
                   <ShootRequirementsSection
                     id="admin-schedule"
                     booking={form}
-                    entries={data.schedule}
+                    entries={shootRequirementsFromSchedule(data.schedule)}
                     onAdd={async (entry) => {
                       await api.post(`/api/bookings/${id}/schedule`, entry);
                       toast('Shoot day added');
@@ -916,6 +884,17 @@ export default function BookingDetailPage() {
                       toast('Site removed');
                       await refreshRelated();
                     }}
+                    onRemoveAll={async () => {
+                      const result = await api.delete(`/api/bookings/${id}/sites`, {
+                        removeAll: true,
+                      });
+                      toast(
+                        result?.count
+                          ? `Removed ${result.count} site${result.count === 1 ? '' : 's'}`
+                          : 'All sites removed'
+                      );
+                      await refreshRelated();
+                    }}
                   />
                   <DeliverablesSection
                     id="admin-deliverables"
@@ -933,6 +912,14 @@ export default function BookingDetailPage() {
                         categories={DELIVERABLE_FILE_CATEGORIES}
                         title="Files"
                         hideChrome
+                        onImport={() => {
+                          setImportSourceFiles([]);
+                          setImportOpen(true);
+                        }}
+                        onUseExistingDocs={(files) => {
+                          setImportSourceFiles(files);
+                          setImportOpen(true);
+                        }}
                       />
                     }
                   />
@@ -942,7 +929,14 @@ export default function BookingDetailPage() {
                 </TabsContent>
 
               <TabsContent value="calendar">
-                <CalendarSection entries={data.schedule} />
+                <CalendarSection
+                  entries={data.schedule}
+                  onRemove={async (entryId) => {
+                    await api.delete(`/api/bookings/${id}/schedule`, { entryId });
+                    toast('Removed from calendar');
+                    await refreshRelated();
+                  }}
+                />
               </TabsContent>
 
               <TabsContent value="portal">
@@ -1105,11 +1099,15 @@ export default function BookingDetailPage() {
         {importOpen ? (
           <DocumentImportDialog
             open={importOpen}
-            onOpenChange={setImportOpen}
-            mode="full"
+            onOpenChange={(next) => {
+              setImportOpen(next);
+              if (!next) setImportSourceFiles([]);
+            }}
+            mode="calendar"
             bookingId={id}
             currentValues={form}
             existingSchedule={data.schedule}
+            existingFiles={importSourceFiles}
             onApplyFields={(patch) => {
               setForm((f) => ({ ...f, ...patch }));
               setDirty(true);
@@ -1119,17 +1117,13 @@ export default function BookingDetailPage() {
                 return next;
               });
             }}
-            onApplied={async ({ patch = {}, sitesAdded = 0, scheduleAdded = 0 } = {}) => {
-              if (sitesAdded || scheduleAdded) {
+            onApplied={async ({ scheduleAdded = 0 } = {}) => {
+              if (scheduleAdded) {
                 const result = await api.get(`/api/bookings/${id}`);
                 setData(result);
-                // Imported scalar fields win over server snapshot
-                setForm((f) => ({ ...result.booking, ...f, ...patch }));
-                if (Object.keys(patch).length) setDirty(true);
                 refreshRecentUpdates();
+                setTab('calendar');
               }
-              if (scheduleAdded) setTab('calendar');
-              else if (Object.keys(patch).length) setTab('details');
             }}
           />
         ) : null}

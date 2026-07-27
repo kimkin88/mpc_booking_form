@@ -18,6 +18,7 @@ import {
   remainingBudget,
   shootRowsCost,
 } from '@/lib/rateCard';
+import { shootRequirementsFromSchedule, scheduleAddedByMeta } from '@/lib/calendarFormats';
 import { formatDate, formatCurrencyWhole, toDateInputValue } from '@/utils/format';
 
 const RowCard = styled.div`
@@ -30,6 +31,15 @@ const RowCard = styled.div`
   margin-bottom: ${({ theme }) => theme.space[3]};
   background: ${({ theme, $variant }) =>
     $variant === 'draft' ? theme.colors.bgMuted : theme.colors.surface};
+`;
+
+const RowHeader = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.space[2]};
+  margin-bottom: ${({ theme }) => theme.space[3]};
 `;
 
 const BudgetBar = styled.div`
@@ -91,7 +101,7 @@ function rowKey(row) {
  */
 export function ShootRequirementsSection({
   booking,
-  entries = [],
+  entries: entriesProp = [],
   onAdd,
   onUpdate,
   onRemove,
@@ -101,6 +111,11 @@ export function ShootRequirementsSection({
   const rates = useMemo(() => ratesFromBooking(booking), [booking]);
   const budget = booking?.budget;
   const currency = booking?.currency || 'GBP';
+  // Never show calendar live-format rows here — those belong on the Calendar tab only
+  const entries = useMemo(
+    () => shootRequirementsFromSchedule(entriesProp),
+    [entriesProp]
+  );
 
   const [draft, setDraft] = useState(() => emptyDraft());
   const [draftOpen, setDraftOpen] = useState(false);
@@ -275,10 +290,6 @@ export function ShootRequirementsSection({
   };
 
   const handleRemove = async (entryId) => {
-    if (entries.length <= 1) {
-      setError('At least one shoot row must remain');
-      return;
-    }
     setError('');
     setWarning('');
     try {
@@ -296,7 +307,8 @@ export function ShootRequirementsSection({
         {money(rates.halfDay, currency)} = 0.5 day.
         {budgetSet
           ? ' Use + to add a shoot row when remaining budget allows.'
-          : ' Set a shoot budget above before adding shoot rows.'}
+          : ' Set a shoot budget above before adding shoot rows.'}{' '}
+        Preferred dates also appear on the Calendar tab (orange day numbers).
       </SectionHint>
 
       <BudgetBar>
@@ -338,9 +350,23 @@ export function ShootRequirementsSection({
           entry.applied_rate != null
             ? Number(entry.applied_rate)
             : costForDayLength(entry.day_length, rates);
+        const who = scheduleAddedByMeta(entry);
 
         return (
           <RowCard key={entry.id} $variant="saved">
+            <RowHeader>
+              <Badge $tone={who.tone} title={who.name ? `Added by ${who.name}` : undefined}>
+                {who.label}
+                {who.name ? ` · ${who.name}` : ''}
+              </Badge>
+              {!readOnly && (
+                <RemoveIconButton
+                  onClick={() => handleRemove(entry.id)}
+                  disabled={saving}
+                  title="Remove shoot row"
+                />
+              )}
+            </RowHeader>
             <Grid $cols={3}>
               <Select
                 label="Shoot Day Length"
@@ -369,17 +395,6 @@ export function ShootRequirementsSection({
                 Calculated cost: {money(rowCost, entry.applied_currency || currency)}
                 {entry.shoot_date ? ` · ${formatDate(entry.shoot_date)}` : ''}
               </span>
-              {!readOnly && (
-                <RemoveIconButton
-                  onClick={() => handleRemove(entry.id)}
-                  disabled={saving || entries.length <= 1}
-                  title={
-                    entries.length <= 1
-                      ? 'At least one shoot row must remain'
-                      : 'Remove shoot row'
-                  }
-                />
-              )}
             </Row>
           </RowCard>
         );
