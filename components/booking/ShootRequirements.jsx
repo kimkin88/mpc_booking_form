@@ -111,7 +111,7 @@ export function ShootRequirementsSection({
   const spent = shootRowsCost(entries, rates);
   const remaining = remainingBudget(budget, entries, rates);
   const budgetSet = hasBudgetCap(budget);
-  const canAddMore = !readOnly && canAddShootRow(budget, entries, rates);
+  const canAddMore = !readOnly && budgetSet && canAddShootRow(budget, entries, rates);
   const showDraftRow = draftOpen && canAddMore;
 
   const draftOptions = useMemo(() => {
@@ -293,8 +293,10 @@ export function ShootRequirementsSection({
       <SectionTitle>Shoot requirements</SectionTitle>
       <SectionHint>
         {rates.label}: {money(rates.fullDay, currency)} = 1 day ·{' '}
-        {money(rates.halfDay, currency)} = 0.5 day. Use + to add a shoot row when remaining budget
-        allows.
+        {money(rates.halfDay, currency)} = 0.5 day.
+        {budgetSet
+          ? ' Use + to add a shoot row when remaining budget allows.'
+          : ' Set a shoot budget above before adding shoot rows.'}
       </SectionHint>
 
       <BudgetBar>
