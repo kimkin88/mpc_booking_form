@@ -527,6 +527,7 @@ export function AdminShell({ children, wide = false }) {
           <HeaderEnd>
             <DataRefreshButton />
             <NotificationsBell />
+            <ThemeToggle variant="header" />
             {!loading && (
               <IconButton
                 type="button"
@@ -581,14 +582,6 @@ export function AdminShell({ children, wide = false }) {
                         </MetaRow>
                       </AccountMeta>
                     </AccountCard>
-
-                    <SettingsGroup>
-                      <GroupLabel>Appearance</GroupLabel>
-                      <SettingsActions>
-                        <ThemeToggle />
-                      </SettingsActions>
-                    </SettingsGroup>
-
                     <SettingsGroup>
                       <GroupLabel>OpenAI usage</GroupLabel>
                       <AccountCard>
