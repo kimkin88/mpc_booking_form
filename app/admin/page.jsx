@@ -12,22 +12,35 @@ import { Badge } from '@/components/ui/Tabs';
 import { EmptyStateBlock } from '@/components/ui/EmptyState';
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ui/Dialog';
+import { RemoveIconButton } from '@/components/ui/IconButton';
 import { api } from '@/lib/apiClient';
 import { BOOKING_STATUSES } from '@/lib/constants';
-import { formatCurrency, formatDateTime } from '@/utils/format';
+import { formatCurrency } from '@/utils/format';
 import { useDebouncedValue } from '@/hooks/useUnsavedChanges';
 import { useToast } from '@/components/ui/Toast';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 
 const PAGE_SIZE = 20;
+const SORT_OPTIONS = [
+  { value: 'updated_desc', label: 'Updated: Newest first' },
+  { value: 'updated_asc', label: 'Updated: Oldest first' },
+  { value: 'created_desc', label: 'Created: Newest first' },
+  { value: 'created_asc', label: 'Created: Oldest first' },
+  { value: 'sb_asc', label: 'SB Number: A-Z' },
+  { value: 'sb_desc', label: 'SB Number: Z-A' },
+  { value: 'client_asc', label: 'Client: A-Z' },
+  { value: 'client_desc', label: 'Client: Z-A' },
+  { value: 'campaign_asc', label: 'Campaign: A-Z' },
+  { value: 'campaign_desc', label: 'Campaign: Z-A' },
+];
 
 const Toolbar = styled.div`
   display: grid;
-  grid-template-columns: 1fr 220px;
+  grid-template-columns: minmax(280px, 1fr) 220px 240px;
   gap: ${({ theme }) => theme.space[3]};
   margin-bottom: ${({ theme }) => theme.space[6]};
 
-  @media (max-width: ${({ theme }) => theme.breakpoints.md}) {
+  @media (max-width: ${({ theme }) => theme.breakpoints.lg}) {
     grid-template-columns: 1fr;
   }
 `;
@@ -155,6 +168,18 @@ function statusTone(status) {
   return 'neutral';
 }
 
+function formatUpdatedCell(value, locale = 'en-GB') {
+  if (!value) return '—';
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '—';
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getFullYear());
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm}.${yyyy}, ${hh}:${min}`;
+}
+
 export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState([]);
   const [total, setTotal] = useState(0);
@@ -163,6 +188,7 @@ export default function AdminBookingsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
+  const [sort, setSort] = useState('updated_desc');
   const [confirmBooking, setConfirmBooking] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -171,7 +197,7 @@ export default function AdminBookingsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, status]);
+  }, [debouncedSearch, status, sort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +206,7 @@ export default function AdminBookingsPage() {
       const params = new URLSearchParams();
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (status !== 'all') params.set('status', status);
+      if (sort !== 'updated_desc') params.set('sort', sort);
       params.set('page', String(page));
       params.set('pageSize', String(PAGE_SIZE));
       try {
@@ -198,7 +225,7 @@ export default function AdminBookingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, status, page, toast, reloadToken]);
+  }, [debouncedSearch, status, sort, page, toast, reloadToken]);
 
   useDataRefresh(() => setReloadToken((n) => n + 1));
 
@@ -222,7 +249,7 @@ export default function AdminBookingsPage() {
     }
   };
 
-  const hasFilters = Boolean(debouncedSearch) || status !== 'all';
+  const hasFilters = Boolean(debouncedSearch) || status !== 'all' || sort !== 'updated_desc';
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
 
@@ -253,6 +280,7 @@ export default function AdminBookingsPage() {
           onValueChange={setStatus}
           options={[{ value: 'all', label: 'All statuses' }, ...BOOKING_STATUSES]}
         />
+        <Select label="Sort" value={sort} onValueChange={setSort} options={SORT_OPTIONS} />
       </Toolbar>
 
       {loading && <TableSkeleton />}
@@ -272,6 +300,7 @@ export default function AdminBookingsPage() {
                 onClick={() => {
                   setSearch('');
                   setStatus('all');
+                  setSort('updated_desc');
                 }}
               >
                 Clear filters
@@ -299,7 +328,7 @@ export default function AdminBookingsPage() {
               <span>Status</span>
               <span>Budget</span>
               <span>Updated</span>
-              <span>Actions</span>
+              <span style={{ marginLeft: '0.5rem' }}>Actions</span>
             </Head>
             {bookings.map((b) => (
               <TableRow key={b.id} role="row">
@@ -328,22 +357,18 @@ export default function AdminBookingsPage() {
                   </Cell>
                   <Cell>
                     <MobileLabel>Updated</MobileLabel>
-                    <MutedText>{formatDateTime(b.updated_at)}</MutedText>
+                    <MutedText>{formatUpdatedCell(b.updated_at)}</MutedText>
                   </Cell>
                 </RowLink>
                 <ActionsCell>
                   <MobileLabel>Actions</MobileLabel>
-                  <Button
-                    size="sm"
-                    variant="danger"
+                  <RemoveIconButton
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       setConfirmBooking(b);
                     }}
-                  >
-                    Remove
-                  </Button>
+                  />
                 </ActionsCell>
               </TableRow>
             ))}

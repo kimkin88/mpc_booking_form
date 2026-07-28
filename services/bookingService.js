@@ -57,12 +57,26 @@ export async function listBookings({
   status = null,
   page = 1,
   pageSize = 20,
+  sort = 'updated_desc',
 } = {}) {
   const supabase = createServiceClient();
   const safePage = Math.max(1, Number(page) || 1);
   const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
   const from = (safePage - 1) * safePageSize;
   const to = from + safePageSize - 1;
+  const sortMap = {
+    updated_desc: { column: 'updated_at', ascending: false },
+    updated_asc: { column: 'updated_at', ascending: true },
+    created_desc: { column: 'created_at', ascending: false },
+    created_asc: { column: 'created_at', ascending: true },
+    sb_asc: { column: 'sb_number', ascending: true },
+    sb_desc: { column: 'sb_number', ascending: false },
+    client_asc: { column: 'client_company', ascending: true },
+    client_desc: { column: 'client_company', ascending: false },
+    campaign_asc: { column: 'campaign_name', ascending: true },
+    campaign_desc: { column: 'campaign_name', ascending: false },
+  };
+  const sortConfig = sortMap[sort] || sortMap.updated_desc;
 
   let query = supabase
     .from('bookings')
@@ -70,7 +84,7 @@ export async function listBookings({
       'id, sb_number, status, campaign_name, client_company, city_market, currency, budget, current_version, updated_at, created_at',
       { count: 'exact' }
     )
-    .order('updated_at', { ascending: false })
+    .order(sortConfig.column, { ascending: sortConfig.ascending, nullsFirst: false })
     .range(from, to);
 
   if (status) query = query.eq('status', status);

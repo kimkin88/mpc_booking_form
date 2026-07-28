@@ -9,6 +9,7 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') || null;
+  const sort = searchParams.get('sort') || 'updated_desc';
   const suggestSb = searchParams.get('suggestSb') === '1';
   const page = Number(searchParams.get('page') || 1);
   const pageSize = Number(searchParams.get('pageSize') || 20);
@@ -19,7 +20,7 @@ export async function GET(request) {
       return jsonOk({ sb_number });
     }
 
-    const data = await listBookings({ search, status, page, pageSize });
+    const data = await listBookings({ search, status, page, pageSize, sort });
     return jsonOk(data);
   } catch (err) {
     return jsonError(err.message, 500);
