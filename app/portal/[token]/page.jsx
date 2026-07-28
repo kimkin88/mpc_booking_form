@@ -493,7 +493,7 @@ export default function PortalPage() {
   };
 
   const permissions = data?.permissions || {};
-  const editable = data?.portal?.editable;
+  const editable = data?.viewerIsAdmin ? true : data?.portal?.editable;
 
   useEffect(() => {
     permissionsRef.current = permissions;

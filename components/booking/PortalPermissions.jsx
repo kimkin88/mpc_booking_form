@@ -278,10 +278,17 @@ function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
                   } else if (result.ok === false && result.reason === 'no_email') {
                     toast('No recipient emails on this booking', { variant: 'error' });
                   } else {
+                    const emails = (result.recipients || result.reminder?.recipient_emails || [])
+                      .filter(Boolean)
+                      .join(', ');
                     toast(
                       result.deliveryStatus === 'stubbed'
-                        ? 'Reminder logged (email provider not configured)'
-                        : 'Reminder sent'
+                        ? emails
+                          ? `Reminder logged (email provider not configured) · ${emails}`
+                          : 'Reminder logged (email provider not configured)'
+                        : emails
+                          ? `Reminder sent to ${emails}`
+                          : 'Reminder sent'
                     );
                   }
                   await load();
@@ -301,13 +308,17 @@ function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
 
           {reminders.length > 0 && (
             <ReminderList>
-              {reminders.slice(0, 8).map((r) => (
-                <li key={r.id}>
-                  {r.reminder_type} · {r.delivery_status}
-                  {r.sent_at ? ` · ${formatDateTime(r.sent_at)}` : ''}
-                  {r.error_message ? ` · ${r.error_message}` : ''}
-                </li>
-              ))}
+              {reminders.slice(0, 8).map((r) => {
+                const emails = (r.recipient_emails || []).filter(Boolean);
+                return (
+                  <li key={r.id}>
+                    {r.reminder_type} · {r.delivery_status}
+                    {r.sent_at ? ` · ${formatDateTime(r.sent_at)}` : ''}
+                    {emails.length > 0 ? ` · to ${emails.join(', ')}` : ''}
+                    {r.error_message ? ` · ${r.error_message}` : ''}
+                  </li>
+                );
+              })}
             </ReminderList>
           )}
         </>

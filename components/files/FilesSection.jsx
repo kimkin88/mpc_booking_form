@@ -43,6 +43,27 @@ const CategoryBlock = styled.div`
   background: ${({ theme }) => theme.colors.surface};
 `;
 
+const CategoryToolbar = styled.div`
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: ${({ theme }) => theme.space[2]};
+  flex-shrink: 0;
+
+  > div {
+    width: auto;
+    min-width: 10.5rem;
+  }
+
+  button {
+    box-sizing: border-box;
+    min-height: 2.5rem;
+    height: 2.5rem;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+`;
+
 const FileRow = styled.div`
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr) auto;
@@ -249,6 +270,12 @@ const MenuItem = styled(DropdownMenu.Item)`
   &[data-highlighted] {
     background: ${({ theme }) => theme.colors.primaryMuted};
   }
+
+  &[data-disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
 `;
 
 function statusTone(status) {
@@ -326,11 +353,7 @@ function FileThumb({ file, portalToken, onPreview }) {
     >
       {url && !failed ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt=""
-          onError={() => setFailed(true)}
-        />
+        <img src={url} alt="" onError={() => setFailed(true)} />
       ) : failed ? (
         <FileTypeBadge>img</FileTypeBadge>
       ) : (
@@ -534,14 +557,7 @@ export function FilesSection({
         setTimeout(() => setProgress(0), 600);
       }
     },
-    [
-      bookingId,
-      clearPendingPreviews,
-      descriptions,
-      onRefresh,
-      portalToken,
-      toast,
-    ]
+    [bookingId, clearPendingPreviews, descriptions, onRefresh, portalToken, toast]
   );
 
   const onDrop = (category, e) => {
@@ -709,70 +725,71 @@ export function FilesSection({
           const status = statusFor(cat.value);
           return (
             <CategoryBlock key={cat.value}>
-              <Row style={{ justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem' }}>
+              <Row
+                style={{ justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.75rem' }}
+              >
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <strong>{cat.label}</strong>
                   <div style={{ marginTop: '0.35rem' }}>
                     <Badge $tone={statusTone(status)}>
                       {FILE_STATUSES.find((s) => s.value === status)?.label || status}
                     </Badge>
-                    <FileCount>
-                      {catFiles.filter((f) => !f.is_removed).length} file(s)
-                    </FileCount>
+                    <FileCount>{catFiles.filter((f) => !f.is_removed).length} file(s)</FileCount>
                   </div>
                 </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: '0.5rem',
-                    alignItems: 'flex-start',
-                    justifyContent: 'flex-end',
-                  }}
-                >
-                  {isAdmin && cat.value === 'media_plan' && typeof onImport === 'function' && (
-                    <Button
-                      type="button"
-                      variant="accent"
-                      size="sm"
-                      title="Upload or select a spreadsheet to parse booking fields"
-                      onClick={() => onImport(catFiles.filter((f) => !f.is_removed), cat.value)}
-                    >
-                      Import
-                    </Button>
-                  )}
-                  {isAdmin &&
-                    cat.value === 'media_plan' &&
-                    typeof onUseExistingDocs === 'function' && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!catFiles.some((f) => !f.is_removed)}
-                        title={
-                          catFiles.some((f) => !f.is_removed)
-                            ? 'Autofill booking fields from uploaded Media Plan files'
-                            : 'Upload a Media Plan spreadsheet first'
-                        }
-                        onClick={() =>
-                          onUseExistingDocs(
-                            catFiles.filter((f) => !f.is_removed),
-                            cat.value
-                          )
-                        }
-                      >
-                        Use existing docs
-                      </Button>
-                    )}
+                <CategoryToolbar>
                   {isAdmin && (
                     <Select
                       label=""
                       value={status}
                       onValueChange={(v) => changeCategoryStatus(cat.value, v)}
                       options={FILE_STATUSES}
+                      fullWidth={false}
                     />
                   )}
-                </div>
+                  {isAdmin &&
+                    cat.value === 'media_plan' &&
+                    (typeof onImport === 'function' || typeof onUseExistingDocs === 'function') && (
+                      <DropdownMenu.Root modal={false}>
+                        <DropdownMenu.Trigger asChild>
+                          <Button variant="secondary" type="button" style={{ fontWeight: 400 }}>
+                            Options
+                            <ChevronIcon />
+                          </Button>
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <MenuContent align="end" sideOffset={4}>
+                            {typeof onImport === 'function' && (
+                              <MenuItem
+                                onSelect={() =>
+                                  onImport(
+                                    catFiles.filter((f) => !f.is_removed),
+                                    cat.value
+                                  )
+                                }
+                              >
+                                Import new file to parse data
+                              </MenuItem>
+                            )}
+                            {typeof onUseExistingDocs === 'function' && (
+                              <MenuItem
+                                disabled={!catFiles.some((f) => !f.is_removed)}
+                                onSelect={() => {
+                                  if (!catFiles.some((f) => !f.is_removed)) return;
+                                  onUseExistingDocs(
+                                    catFiles.filter((f) => !f.is_removed),
+                                    cat.value
+                                  );
+                                }}
+                              >
+                                Parse existing files data
+                              </MenuItem>
+                            )}
+                          </MenuContent>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
+                    )}
+                </CategoryToolbar>
               </Row>
 
               {!readOnly && (
@@ -863,11 +880,7 @@ export function FilesSection({
 
               {catFiles.map((file) => (
                 <FileRow key={file.id}>
-                  <FileThumb
-                    file={file}
-                    portalToken={portalToken}
-                    onPreview={setPreview}
-                  />
+                  <FileThumb file={file} portalToken={portalToken} onPreview={setPreview} />
                   <FileInfo>
                     <FileNameRow>
                       <FileName title={file.original_filename}>{file.original_filename}</FileName>
@@ -884,11 +897,7 @@ export function FilesSection({
                   </FileInfo>
                   <ActionsCell>
                     {isImageMime(file.mime_type) && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => openPreview(file)}
-                      >
+                      <Button variant="secondary" size="sm" onClick={() => openPreview(file)}>
                         Preview
                       </Button>
                     )}
@@ -920,23 +929,26 @@ export function FilesSection({
                               ))}
                             </>
                           )}
-                          {!readOnly && !file.is_removed && (isAdmin || clientCanMutateFile(file)) && (
-                            <>
-                              <MenuItem
-                                onSelect={() => {
-                                  const input = document.createElement('input');
-                                  input.type = 'file';
-                                  input.onchange = () => {
-                                    if (input.files?.[0]) replaceFile(file.id, input.files[0], file);
-                                  };
-                                  input.click();
-                                }}
-                              >
-                                Replace
-                              </MenuItem>
-                              <MenuItem onSelect={() => removeFile(file)}>Remove</MenuItem>
-                            </>
-                          )}
+                          {!readOnly &&
+                            !file.is_removed &&
+                            (isAdmin || clientCanMutateFile(file)) && (
+                              <>
+                                <MenuItem
+                                  onSelect={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.onchange = () => {
+                                      if (input.files?.[0])
+                                        replaceFile(file.id, input.files[0], file);
+                                    };
+                                    input.click();
+                                  }}
+                                >
+                                  Replace
+                                </MenuItem>
+                                <MenuItem onSelect={() => removeFile(file)}>Remove</MenuItem>
+                              </>
+                            )}
                           {!readOnly &&
                             !file.is_removed &&
                             !isAdmin &&

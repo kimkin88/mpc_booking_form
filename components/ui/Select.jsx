@@ -97,11 +97,19 @@ export function Select({
   options = [],
   disabled,
   name,
+  fullWidth = true,
 }) {
   const inputId = id || name;
 
   return (
-    <Field label={label} htmlFor={inputId} required={required} hint={hint} error={error}>
+    <Field
+      label={label}
+      htmlFor={inputId}
+      required={required}
+      hint={hint}
+      error={error}
+      fullWidth={fullWidth}
+    >
       <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
         <Trigger id={inputId} aria-required={required} $error={!!error}>
           <SelectPrimitive.Value placeholder={placeholder} />

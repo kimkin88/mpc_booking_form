@@ -32,7 +32,8 @@ export async function PATCH(request, { params }) {
     if (gate.error) return gate.error;
 
     const { portal, booking } = gate.resolved;
-    if (!isPortalEditable(portal, booking.status)) {
+    const viewerIsAdmin = await portalViewerIsAdmin();
+    if (!viewerIsAdmin && !isPortalEditable(portal, booking.status)) {
       return jsonError('Portal is read-only', 403, { code: 'READ_ONLY' });
     }
 

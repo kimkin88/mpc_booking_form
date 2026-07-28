@@ -1,6 +1,6 @@
 import { jsonOk, jsonError } from '@/lib/api';
 import { isPortalEditable } from '@/services/portalService';
-import { requirePortalFromRequest } from '@/lib/portalApi';
+import { requirePortalFromRequest, portalViewerIsAdmin } from '@/lib/portalApi';
 import { getBooking } from '@/services/bookingService';
 import {
   permissionsArrayToMap,
@@ -25,7 +25,10 @@ export async function POST(request, { params }) {
     if (gate.error) return gate.error;
 
     const { portal, booking } = gate.resolved;
-    if (!isPortalEditable(portal, booking.status)) return jsonError('Portal is read-only', 403);
+    const viewerIsAdmin = await portalViewerIsAdmin();
+    if (!viewerIsAdmin && !isPortalEditable(portal, booking.status)) {
+      return jsonError('Portal is read-only', 403);
+    }
 
     const full = await getBooking(booking.id);
     const permissionsMap = permissionsArrayToMap(full.permissions);
@@ -103,7 +106,8 @@ export async function DELETE(request, { params }) {
     if (gate.error) return gate.error;
 
     const { portal, booking } = gate.resolved;
-    if (!isPortalEditable(portal, booking.status)) {
+    const viewerIsAdmin = await portalViewerIsAdmin();
+    if (!viewerIsAdmin && !isPortalEditable(portal, booking.status)) {
       return jsonError('Portal is read-only — file changes are not allowed', 403, {
         code: 'READ_ONLY',
       });
