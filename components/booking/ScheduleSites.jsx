@@ -157,7 +157,7 @@ const DayNumber = styled.span`
   line-height: 1;
   background: ${({ $shoot, theme, $today }) => {
     if ($shoot) return SHOOT_DAY_COLOR;
-    if ($today) return theme.colors.text;
+    if ($today) return theme.colors.primary;
     return 'transparent';
   }};
   color: ${({ theme, $shoot, $outside, $today }) => {
@@ -329,7 +329,7 @@ const TodayLegendDot = styled.span`
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  background: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.primary};
   display: inline-flex;
   flex-shrink: 0;
 `;
