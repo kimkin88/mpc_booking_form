@@ -1,16 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { EmptyState, Badge } from '@/components/ui/Tabs';
-import { RemoveIconButton } from '@/components/ui/IconButton';
+import { PencilIcon, RemoveIconButton } from '@/components/ui/IconButton';
 import { Section, SectionTitle, SectionHint, Grid, Row } from '@/components/layout/PageHeader';
 import { formatDate } from '@/utils/format';
 import {
+  assignDistinctLaneColors,
   colorForLiveEntry,
   entryCoversDate,
   formatsOnDate,
@@ -21,6 +22,7 @@ import {
   shootsOnDate,
   uniqueLiveFormats,
 } from '@/lib/calendarFormats';
+import { CalendarDayModal } from '@/components/booking/CalendarDayModal';
 
 const CalendarShell = styled.div`
   background: ${({ theme }) => theme.colors.surface};
@@ -98,7 +100,7 @@ const Calendar = styled.div`
   border-left: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
-const DayCell = styled.button`
+const DayCell = styled.div`
   position: relative;
   display: flex;
   flex-direction: column;
@@ -133,6 +135,41 @@ const DayCell = styled.button`
     outline: 2px solid ${({ theme }) => theme.colors.focus};
     outline-offset: -2px;
     z-index: 2;
+  }
+`;
+
+const DayEditBtn = styled.button`
+  position: absolute;
+  top: 0.15rem;
+  right: 0.15rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: ${({ theme }) => theme.radii.sm};
+  background: ${({ theme }) => theme.colors.surface};
+  color: ${({ theme }) => theme.colors.textMuted};
+  box-shadow: ${({ theme }) => theme.shadows.sm};
+  cursor: pointer;
+  line-height: 1;
+
+  svg {
+    width: 0.8rem;
+    height: 0.8rem;
+  }
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.text};
+    background: ${({ theme }) => theme.colors.bgMuted};
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.focus};
+    outline-offset: 1px;
   }
 `;
 
@@ -415,14 +452,23 @@ export function CalendarSection({
   locale = 'en-GB',
   id,
   onRemove,
+  onAdd,
+  onUpdate,
   readOnly = false,
 }) {
   const liveFormats = useMemo(() => uniqueLiveFormats(entries), [entries]);
   const shootDates = useMemo(() => shootDatesFromSchedule(entries), [entries]);
+  const colorMapRef = useRef(new Map());
+  const colorByKey = useMemo(() => {
+    const next = assignDistinctLaneColors(liveFormats, colorMapRef.current);
+    colorMapRef.current = next;
+    return next;
+  }, [liveFormats]);
 
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(null);
   const [didAutoFocus, setDidAutoFocus] = useState(false);
+  const [dayModalOpen, setDayModalOpen] = useState(false);
 
   useEffect(() => {
     if (didAutoFocus) return;
@@ -466,13 +512,17 @@ export function CalendarSection({
     : [];
   const selectedShoots = selectedKey ? shootsOnDate(entries, selectedKey) : [];
   const todayKey = toKey(new Date());
+  const canEditDay = !readOnly && (onRemove || onAdd || onUpdate);
 
   return (
     <Section id={id}>
       <SectionTitle>Shoot Schedule &amp; Live Dates</SectionTitle>
       <SectionHint>
         Orange day numbers are manually added shoot requirements. Coloured bars are live media
-        formats from the media plan. Click a day to review both.
+        formats from the media plan. Click a day to review
+        {readOnly
+          ? '.'
+          : ', then use the pencil in the day square to add, edit, or remove actions.'}
       </SectionHint>
 
       <CalendarShell>
@@ -513,7 +563,8 @@ export function CalendarSection({
             return (
               <DayCell
                 key={key}
-                type="button"
+                role="gridcell"
+                tabIndex={0}
                 $outside={outside}
                 $selected={isSelected}
                 $today={isToday}
@@ -525,12 +576,32 @@ export function CalendarSection({
                     ? `, ${dayFormats.length} format${dayFormats.length === 1 ? '' : 's'} live`
                     : ''
                 }${isSelected ? ', selected' : ''}`}
-                aria-pressed={isSelected}
+                aria-selected={isSelected}
                 onClick={() => {
                   setSelected(key);
                   if (outside) setCursor(startOfMonth(day));
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelected(key);
+                    if (outside) setCursor(startOfMonth(day));
+                  }
+                }}
               >
+                {isSelected && canEditDay && (
+                  <DayEditBtn
+                    type="button"
+                    aria-label="Edit this day"
+                    title="Edit this day"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDayModalOpen(true);
+                    }}
+                  >
+                    <PencilIcon />
+                  </DayEditBtn>
+                )}
                 <DayNumberWrap>
                   <DayNumber $shoot={isShoot} $outside={outside} $today={isToday && !outside}>
                     {day.getDate()}
@@ -538,7 +609,7 @@ export function CalendarSection({
                 </DayNumberWrap>
                 <DayBars>
                   {liveFormats.map((entry) => {
-                    const color = colorForLiveEntry(entry, liveFormats);
+                    const color = colorForLiveEntry(entry, colorByKey);
                     const active = entryCoversDate(entry, key);
                     return (
                       <DayBar
@@ -559,7 +630,7 @@ export function CalendarSection({
         {liveFormats.length > 0 && (
           <FormatPills>
             {liveFormats.map((entry) => {
-              const color = colorForLiveEntry(entry, liveFormats);
+              const color = colorForLiveEntry(entry, colorByKey);
               return (
                 <FormatPill
                   key={entry.id || `${entry.format}-${entry.live_start}-${entry.live_end}`}
@@ -593,30 +664,33 @@ export function CalendarSection({
       {selected ? (
         <>
           <SelectedDayPanel>
-            <SelectedDayLabel>
-              {new Date(`${selectedKey}T12:00:00`).toLocaleDateString(locale, {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              })}
-            </SelectedDayLabel>
-            <SelectedDayCount>
-              {selectedShoots.length
-                ? `${selectedShoots.length} shoot${selectedShoots.length === 1 ? '' : 's'}`
-                : null}
-              {selectedShoots.length && selectedFormats.length ? ' · ' : null}
-              {selectedFormats.length
-                ? `${selectedFormats.length} format${selectedFormats.length === 1 ? '' : 's'} live`
-                : selectedShoots.length
-                  ? null
-                  : 'Nothing booked'}
-            </SelectedDayCount>
+            <div>
+              <SelectedDayLabel>
+                {new Date(`${selectedKey}T12:00:00`).toLocaleDateString(locale, {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </SelectedDayLabel>
+              <SelectedDayCount style={{ display: 'block', marginTop: '0.25rem' }}>
+                {selectedShoots.length
+                  ? `${selectedShoots.length} shoot${selectedShoots.length === 1 ? '' : 's'}`
+                  : null}
+                {selectedShoots.length && selectedFormats.length ? ' · ' : null}
+                {selectedFormats.length
+                  ? `${selectedFormats.length} format${selectedFormats.length === 1 ? '' : 's'} live`
+                  : selectedShoots.length
+                    ? null
+                    : 'Nothing booked'}
+              </SelectedDayCount>
+            </div>
           </SelectedDayPanel>
 
           {selectedShoots.length === 0 && selectedFormats.length === 0 ? (
             <EmptyState style={{ padding: '1.25rem' }}>
               No shoot requirements or live formats on this day.
+              {canEditDay ? ' Use the pencil to add an action.' : ''}
             </EmptyState>
           ) : (
             <>
@@ -628,7 +702,10 @@ export function CalendarSection({
                     const length =
                       Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
                     return (
-                      <FormatCard key={entry.id || `shoot-${entry.shoot_date}-${entry.city}`} $soft="#F8EDE8">
+                      <FormatCard
+                        key={entry.id || `shoot-${entry.shoot_date}-${entry.city}`}
+                        $soft="#F8EDE8"
+                      >
                         <FormatCardMain>
                           <FormatCardTitle $text="#B45A3C">
                             <FormatDot $color={SHOOT_DAY_COLOR} />
@@ -642,12 +719,6 @@ export function CalendarSection({
                         </FormatCardMain>
                         <CardBadgeRow>
                           <Badge $tone={who.tone}>{who.label}</Badge>
-                          {!readOnly && onRemove && entry.id && (
-                            <RemoveIconButton
-                              onClick={() => onRemove(entry.id)}
-                              title="Remove shoot requirement"
-                            />
-                          )}
                         </CardBadgeRow>
                       </FormatCard>
                     );
@@ -659,7 +730,7 @@ export function CalendarSection({
                 <>
                   <DayGroupTitle>Live formats</DayGroupTitle>
                   {selectedFormats.map((entry) => {
-                    const color = colorForLiveEntry(entry, liveFormats);
+                    const color = colorForLiveEntry(entry, colorByKey);
                     return (
                       <FormatCard
                         key={entry.id || `${entry.format}-${entry.live_start}`}
@@ -675,18 +746,40 @@ export function CalendarSection({
                             {formatLiveDate(entry.live_end, locale)}
                           </FormatCardMeta>
                         </FormatCardMain>
-                        {!readOnly && onRemove && entry.id && (
-                          <RemoveIconButton
-                            onClick={() => onRemove(entry.id)}
-                            title={`Remove ${entry.format}`}
-                          />
-                        )}
                       </FormatCard>
                     );
                   })}
                 </>
               )}
             </>
+          )}
+
+          {canEditDay && (
+            <CalendarDayModal
+              open={dayModalOpen}
+              onOpenChange={setDayModalOpen}
+              dateKey={selectedKey}
+              locale={locale}
+              shoots={selectedShoots}
+              liveFormats={selectedFormats}
+              colorByKey={colorByKey}
+              onRemoveFromDay={
+                onRemove
+                  ? async (entryId, date) => {
+                      await onRemove(entryId, { date });
+                    }
+                  : null
+              }
+              onDeleteEntry={
+                onRemove
+                  ? async (entryId) => {
+                      await onRemove(entryId);
+                    }
+                  : null
+              }
+              onAdd={onAdd || null}
+              onUpdate={onUpdate || null}
+            />
           )}
         </>
       ) : (

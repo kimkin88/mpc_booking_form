@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
 import { assertShootFitsBudget, costForDayLength, ratesFromBooking } from '@/lib/rateCard';
+import { isLiveFormatEntry, planRemoveCalendarDay } from '@/lib/calendarFormats';
 
 function normalizeSchedulePayload(data, booking, { actor } = {}) {
   const rates = ratesFromBooking(booking || {});
@@ -251,12 +252,86 @@ export async function DELETE(request, { params }) {
 
     if (!body.entryId) return jsonError('entryId is required', 400);
 
-    const { data: existing } = await supabase
+    const { data: existing, error: loadError } = await supabase
       .from('schedule_entries')
       .select('*')
       .eq('id', body.entryId)
       .eq('booking_id', id)
       .single();
+
+    if (loadError || !existing) return jsonError('Schedule entry not found', 404);
+
+    const dateKey = body.date ? String(body.date).slice(0, 10) : null;
+
+    // Remove only the selected calendar day (shrink / split live ranges).
+    if (dateKey && (isLiveFormatEntry(existing) || existing.day_length != null)) {
+      const plan = planRemoveCalendarDay(existing, dateKey);
+      if (plan.error) return jsonError(plan.error, 400);
+
+      if (plan.mode === 'delete') {
+        const { error } = await supabase
+          .from('schedule_entries')
+          .delete()
+          .eq('id', body.entryId)
+          .eq('booking_id', id);
+        if (error) return jsonError(error.message, 500);
+      } else if (plan.mode === 'update') {
+        const { error } = await supabase
+          .from('schedule_entries')
+          .update({
+            ...plan.patch,
+            updated_by: auth.actor.id,
+          })
+          .eq('id', body.entryId)
+          .eq('booking_id', id);
+        if (error) return jsonError(error.message, 500);
+      } else if (plan.mode === 'split') {
+        const { error: updateError } = await supabase
+          .from('schedule_entries')
+          .update({
+            ...plan.patch,
+            updated_by: auth.actor.id,
+          })
+          .eq('id', body.entryId)
+          .eq('booking_id', id);
+        if (updateError) return jsonError(updateError.message, 500);
+
+        const {
+          id: _id,
+          created_at: _createdAt,
+          updated_at: _updatedAt,
+          ...rest
+        } = existing;
+        const { error: insertError } = await supabase.from('schedule_entries').insert({
+          ...rest,
+          ...plan.insert,
+          booking_id: id,
+          created_by: auth.actor.id,
+          updated_by: auth.actor.id,
+        });
+        if (insertError) return jsonError(insertError.message, 500);
+      }
+
+      const { versionNumber } = await bumpVersionAndSnapshot(id, {
+        id: auth.actor.id,
+        name: auth.actor.name,
+        source: 'admin_portal',
+      });
+
+      await logActivity({
+        bookingId: id,
+        versionNumber,
+        actorId: auth.actor.id,
+        actorName: auth.actor.name,
+        actorRole: 'admin',
+        action: 'schedule_entry_removed',
+        section: 'schedule',
+        previousValue: { ...existing, removedDate: dateKey, mode: plan.mode },
+        source: 'admin_portal',
+      });
+
+      return jsonOk({ deleted: plan.mode === 'delete', mode: plan.mode, date: dateKey });
+    }
 
     const { error } = await supabase
       .from('schedule_entries')

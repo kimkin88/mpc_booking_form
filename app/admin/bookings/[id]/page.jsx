@@ -933,9 +933,26 @@ export default function BookingDetailPage() {
               <TabsContent value="calendar">
                 <CalendarSection
                   entries={data.schedule}
-                  onRemove={async (entryId) => {
-                    await api.delete(`/api/bookings/${id}/schedule`, { entryId });
-                    toast('Removed from calendar');
+                  onRemove={async (entryId, { date } = {}) => {
+                    await api.delete(`/api/bookings/${id}/schedule`, {
+                      entryId,
+                      ...(date ? { date } : {}),
+                    });
+                    toast(date ? 'Removed from this day' : 'Removed from calendar');
+                    await refreshRelated();
+                  }}
+                  onAdd={async (entry) => {
+                    await api.post(`/api/bookings/${id}/schedule`, entry);
+                    toast(
+                      entry.kind === 'live_format' || (entry.live_start && entry.live_end)
+                        ? 'Live format added'
+                        : 'Shoot day added'
+                    );
+                    await refreshRelated();
+                  }}
+                  onUpdate={async (entry) => {
+                    await api.patch(`/api/bookings/${id}/schedule`, entry);
+                    toast('Calendar action updated');
                     await refreshRelated();
                   }}
                 />

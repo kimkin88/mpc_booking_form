@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import styled, { keyframes } from 'styled-components';
 import { Button } from '@/components/ui/Button';
+import { ScrollArea } from '@/components/ui/ScrollArea';
 
 const overlayShow = keyframes`
   from { opacity: 0; }
@@ -38,7 +39,9 @@ const Content = styled(Dialog.Content)`
     calc(100vw - 2rem)
   );
   max-height: calc(100vh - 2rem);
-  overflow: auto;
+  overflow: ${({ $scrollable }) => ($scrollable ? 'hidden' : 'auto')};
+  display: ${({ $scrollable }) => ($scrollable ? 'flex' : 'block')};
+  flex-direction: column;
   padding: ${({ theme }) => theme.space[6]};
   animation: ${contentShow} 180ms ease;
   z-index: ${({ theme }) => theme.zIndex.modal};
@@ -49,12 +52,28 @@ const Title = styled(Dialog.Title)`
   font-size: ${({ theme }) => theme.fontSizes.xl};
   color: ${({ theme }) => theme.colors.text};
   margin: 0 0 ${({ theme }) => theme.space[2]};
+  flex-shrink: 0;
+  padding-right: 1.75rem;
 `;
 
 const Description = styled(Dialog.Description)`
   color: ${({ theme }) => theme.colors.textMuted};
   margin: 0 0 ${({ theme }) => theme.space[4]};
   font-size: ${({ theme }) => theme.fontSizes.sm};
+  flex-shrink: 0;
+`;
+
+/** Bound height so Radix ScrollArea can scroll (needs a definite size, not only max-height). */
+const BodyScroll = styled(ScrollArea)`
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: -0.35rem;
+  padding-right: 0.35rem;
+
+  && {
+    height: min(70vh, calc(100vh - 12rem));
+    max-height: min(70vh, calc(100vh - 12rem));
+  }
 `;
 
 const Footer = styled.div`
@@ -62,6 +81,7 @@ const Footer = styled.div`
   justify-content: flex-end;
   gap: ${({ theme }) => theme.space[2]};
   margin-top: ${({ theme }) => theme.space[6]};
+  flex-shrink: 0;
 `;
 
 const CloseButton = styled.button`
@@ -84,15 +104,20 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  scrollable = false,
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Overlay />
-        <Content $size={size} aria-describedby={description ? undefined : undefined}>
+        <Content
+          $size={size}
+          $scrollable={scrollable}
+          aria-describedby={description ? undefined : undefined}
+        >
           <Title>{title}</Title>
           {description && <Description>{description}</Description>}
-          {children}
+          {scrollable ? <BodyScroll type="scroll">{children}</BodyScroll> : children}
           {footer && <Footer>{footer}</Footer>}
           <Dialog.Close asChild>
             <CloseButton aria-label="Close">×</CloseButton>

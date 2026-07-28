@@ -58,6 +58,8 @@ const shared = {
     dropdown: 100,
     sticky: 200,
     modal: 300,
+    /** Menus / selects that open inside dialogs */
+    popover: 350,
     toast: 400,
   },
 };

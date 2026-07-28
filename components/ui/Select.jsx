@@ -52,7 +52,7 @@ const Content = styled(SelectPrimitive.Content)`
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: ${({ theme }) => theme.radii.md};
   box-shadow: ${({ theme }) => theme.shadows.md};
-  z-index: ${({ theme }) => theme.zIndex.dropdown};
+  z-index: ${({ theme }) => theme.zIndex.popover || theme.zIndex.modal + 10};
   min-width: var(--radix-select-trigger-width);
   max-height: min(500px, var(--radix-select-content-available-height));
 `;
