@@ -377,17 +377,14 @@ export function FilesSection({
   onImport = null,
 }) {
   const { toast } = useToast();
-  const inputRef = useRef(null);
+  const inputRefs = useRef({});
   const categoryList = categories?.length ? categories : FILE_CATEGORIES;
-  const [activeCategory, setActiveCategory] = useState(categoryList[0].value);
-  const resolvedCategory = categoryList.some((c) => c.value === activeCategory)
-    ? activeCategory
-    : categoryList[0].value;
-  const [dragActive, setDragActive] = useState(false);
+  const [dragCategory, setDragCategory] = useState(null);
+  const [uploadingCategory, setUploadingCategory] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [errors, setErrors] = useState([]);
-  const [description, setDescription] = useState('');
+  const [descriptions, setDescriptions] = useState({});
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versions, setVersions] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -429,11 +426,12 @@ export function FilesSection({
   useEffect(() => () => clearPendingPreviews(), [clearPendingPreviews]);
 
   const upload = useCallback(
-    async (fileList) => {
+    async (category, fileList) => {
       const list = Array.from(fileList || []);
       if (!list.length) return;
 
       clearPendingPreviews();
+      setUploadingCategory(category);
       setPendingPreviews(
         list
           .filter((f) => isImageMime(f.type))
@@ -460,8 +458,8 @@ export function FilesSection({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   action: 'prepare',
-                  category: resolvedCategory,
-                  description: description || null,
+                  category,
+                  description: descriptions[category] || null,
                   files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
                 }),
               });
@@ -473,8 +471,8 @@ export function FilesSection({
             })()
           : await api.post(filesEndpoint, {
               action: 'prepare',
-              category: resolvedCategory,
-              description: description || null,
+              category,
+              description: descriptions[category] || null,
               files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
             });
 
@@ -525,32 +523,32 @@ export function FilesSection({
         } else if (slots.length || earlyFailures.length === 0) {
           toast('Files uploaded');
         }
-        setDescription('');
+        setDescriptions((prev) => ({ ...prev, [category]: '' }));
         await onRefresh?.();
       } catch (err) {
         setErrors([err.message]);
       } finally {
         setUploading(false);
+        setUploadingCategory(null);
         clearPendingPreviews();
         setTimeout(() => setProgress(0), 600);
       }
     },
     [
-      resolvedCategory,
       bookingId,
       clearPendingPreviews,
-      description,
+      descriptions,
       onRefresh,
       portalToken,
       toast,
     ]
   );
 
-  const onDrop = (e) => {
+  const onDrop = (category, e) => {
     e.preventDefault();
-    setDragActive(false);
+    setDragCategory(null);
     if (readOnly) return;
-    upload(e.dataTransfer.files);
+    upload(category, e.dataTransfer.files);
   };
 
   const removeFile = async (file) => {
@@ -695,89 +693,6 @@ export function FilesSection({
         </SectionHint>
       )}
 
-      <Select
-        label={hideChrome ? 'Upload to' : 'Active category for upload'}
-        value={resolvedCategory}
-        onValueChange={setActiveCategory}
-        options={categoryList}
-      />
-
-      {!readOnly && (
-        <>
-          <div style={{ marginTop: '1.25rem' }}>
-            <Input
-              label="Description (optional)"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <DropZone
-            $active={dragActive}
-            role="button"
-            tabIndex={0}
-            aria-label={`Upload files — drag and drop or click. Maximum ${MAX_FILE_SIZE_MB} megabytes per file`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={onDrop}
-            onClick={() => inputRef.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click();
-            }}
-            style={{ marginTop: '1rem' }}
-          >
-            <input
-              ref={inputRef}
-              type="file"
-              multiple
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
-              hidden
-              onChange={(e) => {
-                upload(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            {uploading ? (
-              <>
-                <Spinner aria-label="Uploading" />
-                <p>Uploading…</p>
-                <Progress
-                  $value={progress}
-                  role="progressbar"
-                  aria-valuenow={progress}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <div />
-                </Progress>
-              </>
-            ) : (
-              <>
-                <p style={{ margin: 0, fontWeight: 600 }}>Drag & drop multiple files here</p>
-                <p style={{ margin: '0.35rem 0 0', fontSize: '0.875rem' }}>or click to browse</p>
-                <p style={{ margin: '0.75rem 0 0', fontSize: '0.8125rem', opacity: 0.85 }}>
-                  Max {MAX_FILE_SIZE_MB}MB per file
-                </p>
-              </>
-            )}
-          </DropZone>
-
-          {pendingPreviews.length > 0 && (
-            <PendingStrip aria-label="Images being uploaded">
-              {pendingPreviews.map((p) => (
-                <PendingThumb key={p.id} as="figure">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt="" />
-                  <figcaption title={p.name}>{p.name}</figcaption>
-                </PendingThumb>
-              ))}
-            </PendingStrip>
-          )}
-        </>
-      )}
-
       {errors.length > 0 && (
         <UploadError role="alert">
           {errors.map((err) => (
@@ -859,6 +774,88 @@ export function FilesSection({
                   )}
                 </div>
               </Row>
+
+              {!readOnly && (
+                <>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <Input
+                      label={`${cat.label} description (optional)`}
+                      value={descriptions[cat.value] || ''}
+                      onChange={(e) =>
+                        setDescriptions((prev) => ({ ...prev, [cat.value]: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <DropZone
+                    $active={dragCategory === cat.value}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Upload ${cat.label} files — drag and drop or click. Maximum ${MAX_FILE_SIZE_MB} megabytes per file`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragCategory(cat.value);
+                    }}
+                    onDragLeave={() => setDragCategory(null)}
+                    onDrop={(e) => onDrop(cat.value, e)}
+                    onClick={() => inputRefs.current[cat.value]?.click()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') inputRefs.current[cat.value]?.click();
+                    }}
+                    style={{ marginBottom: '1rem' }}
+                  >
+                    <input
+                      ref={(el) => {
+                        inputRefs.current[cat.value] = el;
+                      }}
+                      type="file"
+                      multiple
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
+                      hidden
+                      onChange={(e) => {
+                        upload(cat.value, e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                    {uploading && uploadingCategory === cat.value ? (
+                      <>
+                        <Spinner aria-label="Uploading" />
+                        <p>Uploading…</p>
+                        <Progress
+                          $value={progress}
+                          role="progressbar"
+                          aria-valuenow={progress}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                        >
+                          <div />
+                        </Progress>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ margin: 0, fontWeight: 600 }}>Upload to {cat.label}</p>
+                        <p style={{ margin: '0.35rem 0 0', fontSize: '0.875rem' }}>
+                          Drag & drop files here or click to browse
+                        </p>
+                        <p style={{ margin: '0.75rem 0 0', fontSize: '0.8125rem', opacity: 0.85 }}>
+                          Max {MAX_FILE_SIZE_MB}MB per file
+                        </p>
+                      </>
+                    )}
+                  </DropZone>
+
+                  {pendingPreviews.length > 0 && uploadingCategory === cat.value && (
+                    <PendingStrip aria-label="Images being uploaded">
+                      {pendingPreviews.map((p) => (
+                        <PendingThumb key={p.id} as="figure">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={p.url} alt="" />
+                          <figcaption title={p.name}>{p.name}</figcaption>
+                        </PendingThumb>
+                      ))}
+                    </PendingStrip>
+                  )}
+                </>
+              )}
 
               {catFiles.length === 0 && (
                 <EmptyState style={{ padding: '1rem' }}>No files in this category</EmptyState>

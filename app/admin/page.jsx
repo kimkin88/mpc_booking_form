@@ -60,9 +60,14 @@ const TableRow = styled.div`
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
   align-items: center;
   color: inherit;
+  transition: background ${({ theme }) => theme.transitions.fast};
 
   &:last-child {
     border-bottom: none;
+  }
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bgMuted};
   }
 
   @media (max-width: ${({ theme }) => theme.breakpoints.lg}) {
