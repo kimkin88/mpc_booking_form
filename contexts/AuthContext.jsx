@@ -27,8 +27,29 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/auth', { method: 'GET' });
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !json.ok) {
+          setUser(null);
+          return;
+        }
+        setUser(json.data.user);
+      } catch {
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const signIn = useCallback(async (email, password) => {
     const res = await fetch('/api/auth', {

@@ -458,21 +458,28 @@ export function AdminShell({ children, wide = false }) {
   const username = user?.email || 'admin';
   const roleLabel = profile?.role === 'admin' || user?.role === 'admin' ? 'Admin' : 'User';
 
+  const usageRequestKey = settingsOpen ? 'open' : 'closed';
+  const [activeUsageKey, setActiveUsageKey] = useState(usageRequestKey);
+  if (usageRequestKey !== activeUsageKey) {
+    setActiveUsageKey(usageRequestKey);
+    if (settingsOpen) setUsageLoading(true);
+  }
+
   useEffect(() => {
     if (!settingsOpen) return undefined;
     let cancelled = false;
-    setUsageLoading(true);
-    api
-      .get('/api/admin/openai-usage')
-      .then((data) => {
+
+    (async () => {
+      try {
+        const data = await api.get('/api/admin/openai-usage');
         if (!cancelled) setTokenUsage(data);
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setTokenUsage(null);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setUsageLoading(false);
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };

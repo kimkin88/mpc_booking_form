@@ -51,18 +51,17 @@ export default function NewBookingPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setSuggesting(true);
-    api
-      .get('/api/bookings?suggestSb=1')
-      .then((data) => {
+
+    (async () => {
+      try {
+        const data = await api.get('/api/bookings?suggestSb=1');
         if (cancelled) return;
         setForm((f) => ({
           ...f,
           // Only fill if the admin hasn't already typed something
           sb_number: f.sb_number || data.sb_number || '',
         }));
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return;
         // Fallback local suggestion if API is unavailable
         const year = new Date().getFullYear();
@@ -70,10 +69,10 @@ export default function NewBookingPage() {
           ...f,
           sb_number: f.sb_number || `SB-${year}-001`,
         }));
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setSuggesting(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

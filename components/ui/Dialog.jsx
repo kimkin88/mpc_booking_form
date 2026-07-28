@@ -4,7 +4,6 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import styled, { keyframes } from 'styled-components';
 import { Button } from '@/components/ui/Button';
-import { ScrollArea } from '@/components/ui/ScrollArea';
 
 const overlayShow = keyframes`
   from { opacity: 0; }
@@ -63,17 +62,11 @@ const Description = styled(Dialog.Description)`
   flex-shrink: 0;
 `;
 
-/** Bound height so Radix ScrollArea can scroll (needs a definite size, not only max-height). */
-const BodyScroll = styled(ScrollArea)`
+const Body = styled.div`
   flex: 1 1 auto;
   min-height: 0;
-  margin-right: -0.35rem;
-  padding-right: 0.35rem;
-
-  && {
-    height: min(70vh, calc(100vh - 12rem));
-    max-height: min(70vh, calc(100vh - 12rem));
-  }
+  display: flex;
+  flex-direction: column;
 `;
 
 const Footer = styled.div`
@@ -104,6 +97,7 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  /** Flex column + overflow hidden so children can own ScrollAreas */
   scrollable = false,
 }) {
   return (
@@ -117,7 +111,7 @@ export function Modal({
         >
           <Title>{title}</Title>
           {description && <Description>{description}</Description>}
-          {scrollable ? <BodyScroll type="scroll">{children}</BodyScroll> : children}
+          {scrollable ? <Body>{children}</Body> : children}
           {footer && <Footer>{footer}</Footer>}
           <Dialog.Close asChild>
             <CloseButton aria-label="Close">×</CloseButton>

@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -123,12 +124,11 @@ export function useDataRefreshContext() {
  */
 export function useDataRefresh(callback) {
   const ctx = useContext(DataRefreshContext);
-  const cbRef = useRef(callback);
-  cbRef.current = callback;
+  const onRefresh = useEffectEvent(callback);
 
   useEffect(() => {
     if (!ctx) return undefined;
-    return ctx.subscribe(() => cbRef.current());
+    return ctx.subscribe(() => onRefresh());
   }, [ctx]);
 }
 

@@ -482,10 +482,23 @@ export default function BookingDetailPage() {
   const [activeDetailSection, setActiveDetailSection] = useState(DETAIL_SECTIONS[0].id);
   const [importOpen, setImportOpen] = useState(false);
   const [importSourceFiles, setImportSourceFiles] = useState([]);
+  const [loadedId, setLoadedId] = useState(id);
 
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const dataRef = useRef(null);
+
+  // Reset booking UI when navigating to another id (avoid setState-in-effect).
+  if (id !== loadedId) {
+    setLoadedId(id);
+    setLoading(true);
+    setData(null);
+    setForm(null);
+    setDirty(false);
+    setRemoteAhead(false);
+    setErrors({});
+    setConflict(null);
+  }
 
   useUnsavedChanges(dirty);
 
@@ -588,14 +601,29 @@ export default function BookingDetailPage() {
   });
 
   useEffect(() => {
-    setLoading(true);
-    load()
-      .catch((err) => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const result = await api.get(`/api/bookings/${id}`);
+        if (cancelled) return;
+        setData(result);
+        setForm({ ...result.booking });
+        setDirty(false);
+        setRemoteAhead(false);
+      } catch (err) {
+        if (cancelled) return;
         toast(err.message, { variant: 'error' });
         if (err.status === 404) router.push('/admin');
-      })
-      .finally(() => setLoading(false));
-  }, [load, router, toast]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, router, toast]);
 
   const onChange = (key, value) => {
     setForm((f) => ({ ...f, [key]: value }));

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -180,6 +180,13 @@ function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState(null);
+  const [loadedBookingId, setLoadedBookingId] = useState(bookingId);
+
+  if (bookingId !== loadedBookingId) {
+    setLoadedBookingId(bookingId);
+    setLoading(true);
+    setData(null);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,8 +201,23 @@ function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
   }, [bookingId, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const result = await api.get(`/api/bookings/${bookingId}/reminders`);
+        if (!cancelled) setData(result);
+      } catch (err) {
+        if (!cancelled) toast(err.message, { variant: 'error' });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, toast]);
 
   const lockDate = data?.portal_lock_date || lockDateProp;
   const autoLock = data?.auto_lock_enabled !== false;
@@ -353,6 +375,15 @@ export function PortalControls({ bookingId, portal: portalProp, booking = null, 
     }
   }, []);
 
+  const portalPropKey = portalProp
+    ? `${portalProp.id || ''}|${portalProp.url || ''}|${portalProp.status || ''}|${JSON.stringify(portalProp.status_portal_editable || {})}`
+    : '';
+  const [syncedPortalKey, setSyncedPortalKey] = useState(portalPropKey);
+  if (portalPropKey !== syncedPortalKey) {
+    setSyncedPortalKey(portalPropKey);
+    syncFromPortal(portalProp || null);
+  }
+
   const loadPortal = useCallback(async () => {
     try {
       const data = await api.get(`/api/bookings/${bookingId}/portal`);
@@ -365,13 +396,22 @@ export function PortalControls({ bookingId, portal: portalProp, booking = null, 
   }, [bookingId, syncFromPortal, toast]);
 
   useEffect(() => {
-    syncFromPortal(portalProp || null);
-  }, [portalProp, syncFromPortal]);
+    let cancelled = false;
 
-  useEffect(() => {
-    // Always re-fetch so the saved URL is visible even if parent payload is stale
-    loadPortal();
-  }, [loadPortal]);
+    (async () => {
+      try {
+        // Always re-fetch so the saved URL is visible even if parent payload is stale
+        const data = await api.get(`/api/bookings/${bookingId}/portal`);
+        if (!cancelled) syncFromPortal(data);
+      } catch (err) {
+        if (!cancelled) toast(err.message, { variant: 'error' });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, syncFromPortal, toast]);
 
   const run = async (action, extra = {}) => {
     setBusy(true);
@@ -743,9 +783,12 @@ export function PermissionsPanel({
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
-  useEffect(() => {
+  const permissionsKey = useMemo(() => JSON.stringify(permissions || {}), [permissions]);
+  const [syncedPermissionsKey, setSyncedPermissionsKey] = useState(permissionsKey);
+  if (permissionsKey !== syncedPermissionsKey) {
+    setSyncedPermissionsKey(permissionsKey);
     setLocal(mergePermissionDefaults(permissions));
-  }, [permissions]);
+  }
 
   const handleSave = async () => {
     if (!hasPortal) {

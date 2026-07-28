@@ -125,22 +125,29 @@ export default function SentLinksPage() {
   const debouncedSearch = useDebouncedValue(search, 300);
   const { toast } = useToast();
 
+  const requestKey = `${debouncedSearch}|${status}|${reloadToken}`;
+  const [activeKey, setActiveKey] = useState(requestKey);
+  if (requestKey !== activeKey) {
+    setActiveKey(requestKey);
+    setLoading(true);
+  }
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (debouncedSearch) params.set('search', debouncedSearch);
-    if (status !== 'all') params.set('status', status);
 
-    api
-      .get(`/api/portals?${params}`)
-      .then((data) => {
+    (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (debouncedSearch) params.set('search', debouncedSearch);
+        if (status !== 'all') params.set('status', status);
+        const data = await api.get(`/api/portals?${params}`);
         if (!cancelled) setLinks(data);
-      })
-      .catch((err) => toast(err.message, { variant: 'error' }))
-      .finally(() => {
+      } catch (err) {
+        if (!cancelled) toast(err.message, { variant: 'error' });
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

@@ -32,6 +32,8 @@ import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { usePortalRemoteSync } from '@/hooks/usePortalRemoteSync';
 import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 
+const EMPTY_PERMISSIONS = {};
+
 function bookingStatusTone(status) {
   if (status === 'approved' || status === 'completed') return 'success';
   if (status === 'cancelled' || status === 'archived') return 'danger';
@@ -335,6 +337,7 @@ export default function PortalPage() {
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | pending | saving | saved | error
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState({});
+  const [loadedToken, setLoadedToken] = useState(token);
 
   const formRef = useRef(form);
   const dirtyRef = useRef(dirty);
@@ -344,6 +347,21 @@ export default function PortalPage() {
   const saveInFlightRef = useRef(false);
   const saveAgainRef = useRef(false);
   const saveProgressRef = useRef(null);
+
+  // Reset portal UI when navigating to another token (avoid setState-in-effect).
+  if (token !== loadedToken) {
+    setLoadedToken(token);
+    setLoading(true);
+    setData(null);
+    setForm(null);
+    setUnavailable(null);
+    setPinRequired(false);
+    setPinError('');
+    setDirty(false);
+    setSaveStatus('idle');
+    setSubmitted(false);
+    setErrors({});
+  }
 
   useUnsavedChanges(dirty);
 
@@ -449,9 +467,22 @@ export default function PortalPage() {
   });
 
   useEffect(() => {
-    setLoading(true);
-    loadPortal()
-      .catch((err) => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const result = await portalRequest(`/api/portal/${token}`);
+        if (cancelled) return;
+        setData(result);
+        setForm({ ...result.booking });
+        setDirty(false);
+        revisionRef.current = 0;
+        setSaveStatus('idle');
+        setUnavailable(null);
+        setPinRequired(false);
+        setPinError('');
+      } catch (err) {
+        if (cancelled) return;
         if (err.code === 'PIN_REQUIRED' || err.extra?.pinRequired || err.code === 'PIN_LOCKED') {
           setPinRequired(true);
           setUnavailable(null);
@@ -467,9 +498,15 @@ export default function PortalPage() {
           setData(null);
           setForm(null);
         }
-      })
-      .finally(() => setLoading(false));
-  }, [loadPortal]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const unlockWithPin = async (e) => {
     e.preventDefault();
@@ -492,7 +529,10 @@ export default function PortalPage() {
     }
   };
 
-  const permissions = data?.permissions || {};
+  const permissions = useMemo(
+    () => data?.permissions || EMPTY_PERMISSIONS,
+    [data?.permissions]
+  );
   const editable = data?.viewerIsAdmin ? true : data?.portal?.editable;
 
   useEffect(() => {
@@ -647,10 +687,9 @@ export default function PortalPage() {
     saveProgressRef.current = saveProgress;
   }, [saveProgress]);
 
-  // Debounced auto-save after edits
+  // Debounced auto-save after edits (pending status is set in onChange)
   useEffect(() => {
     if (!editable || !dirty || !form) return undefined;
-    setSaveStatus((s) => (s === 'saving' ? s : 'pending'));
     const timer = setTimeout(() => {
       saveProgress({ silent: true });
     }, 900);

@@ -331,8 +331,12 @@ function FileThumb({ file, portalToken, onPreview }) {
   useEffect(() => {
     if (!image) return undefined;
     let cancelled = false;
-    setFailed(false);
-    setUrl(null);
+    Promise.resolve().then(() => {
+      if (!cancelled) {
+        setFailed(false);
+        setUrl(null);
+      }
+    });
     resolveFileUrl(file.id, portalToken)
       .then((next) => {
         if (!cancelled) setUrl(next);

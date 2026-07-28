@@ -201,10 +201,6 @@ export default function AdminBookingsPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch, status, sort]);
-
-  useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -212,7 +208,7 @@ export default function AdminBookingsPage() {
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (status !== 'all') params.set('status', status);
       if (sort !== 'updated_desc') params.set('sort', sort);
-      params.set('page', String(page));
+      params.set('page', String(1));
       params.set('pageSize', String(PAGE_SIZE));
       try {
         const data = await api.get(`/api/bookings?${params}`);

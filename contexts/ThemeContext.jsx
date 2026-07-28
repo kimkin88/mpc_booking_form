@@ -1,6 +1,13 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import { ThemeProvider as StyledThemeProvider } from 'styled-components';
 import { darkTheme, lightTheme } from '@/styles/theme';
 import { GlobalStyles } from '@/styles/GlobalStyles';
@@ -14,6 +21,12 @@ const ThemeContext = createContext({
   toggleMode: () => {},
 });
 
+const listeners = new Set();
+
+function emitThemeChange() {
+  listeners.forEach((listener) => listener());
+}
+
 function readStoredMode() {
   if (typeof window === 'undefined') return 'light';
   try {
@@ -26,26 +39,43 @@ function readStoredMode() {
   return 'light';
 }
 
+function subscribe(listener) {
+  listeners.add(listener);
+  const onStorage = (event) => {
+    if (event.key === STORAGE_KEY || event.key === null) listener();
+  };
+  window.addEventListener('storage', onStorage);
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  media.addEventListener('change', listener);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+    media.removeEventListener('change', listener);
+  };
+}
+
+function getServerSnapshot() {
+  return 'light';
+}
+
 export function AppThemeProvider({ children }) {
-  const [mode, setModeState] = useState('light');
-  const [ready, setReady] = useState(false);
+  const mode = useSyncExternalStore(subscribe, readStoredMode, getServerSnapshot);
 
   useEffect(() => {
-    const initial = readStoredMode();
-    setModeState(initial);
-    document.documentElement.dataset.theme = initial;
-    setReady(true);
-  }, []);
+    document.documentElement.dataset.theme = mode;
+    document.documentElement.style.colorScheme = mode;
+  }, [mode]);
 
   const setMode = useCallback((next) => {
     const value = next === 'dark' ? 'dark' : 'light';
-    setModeState(value);
-    document.documentElement.dataset.theme = value;
     try {
       window.localStorage.setItem(STORAGE_KEY, value);
     } catch {
       /* ignore */
     }
+    document.documentElement.dataset.theme = value;
+    document.documentElement.style.colorScheme = value;
+    emitThemeChange();
   }, []);
 
   const toggleMode = useCallback(() => {
@@ -55,8 +85,8 @@ export function AppThemeProvider({ children }) {
   const theme = mode === 'dark' ? darkTheme : lightTheme;
 
   const value = useMemo(
-    () => ({ mode, theme, setMode, toggleMode, ready }),
-    [mode, theme, setMode, toggleMode, ready]
+    () => ({ mode, theme, setMode, toggleMode, ready: true }),
+    [mode, theme, setMode, toggleMode]
   );
 
   return (

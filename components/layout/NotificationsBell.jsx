@@ -147,30 +147,71 @@ export function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [fetchKey, setFetchKey] = useState(0);
+  const [syncedOpen, setSyncedOpen] = useState(false);
+
+  if (open !== syncedOpen) {
+    setSyncedOpen(open);
+    if (open) {
+      setLoading(true);
+      setFetchKey((k) => k + 1);
+    }
+  }
+
+  const applyNotifications = useCallback((data) => {
+    setItems(data.items || []);
+    setUnread(data.unread || 0);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.get('/api/notifications?limit=30');
-      setItems(data.items || []);
-      setUnread(data.unread || 0);
+      applyNotifications(data);
     } catch {
       // silent — header should stay usable
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyNotifications]);
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 60000);
-    return () => clearInterval(id);
-  }, [load]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await api.get('/api/notifications?limit=30');
+        if (!cancelled) applyNotifications(data);
+      } catch {
+        // silent — header should stay usable
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchKey, applyNotifications]);
 
   useEffect(() => {
-    if (open) load();
-  }, [open, load]);
+    let cancelled = false;
+    const id = setInterval(() => {
+      api
+        .get('/api/notifications?limit=30')
+        .then((data) => {
+          if (!cancelled) applyNotifications(data);
+        })
+        .catch(() => {
+          // silent
+        });
+    }, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [applyNotifications]);
 
   useDataRefresh(load);
 

@@ -333,20 +333,27 @@ export function ActivityLogPanel({ bookingId }) {
   const debouncedSearch = useDebouncedValue(search, 250);
   const { toast } = useToast();
 
+  const requestKey = `${bookingId}|${reloadToken}`;
+  const [activeKey, setActiveKey] = useState(requestKey);
+  if (requestKey !== activeKey) {
+    setActiveKey(requestKey);
+    setLoading(true);
+  }
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    api
-      .get(`/api/bookings/${bookingId}/activity?limit=200`)
-      .then((data) => {
+
+    (async () => {
+      try {
+        const data = await api.get(`/api/bookings/${bookingId}/activity?limit=200`);
         if (!cancelled) setItems(Array.isArray(data) ? data : []);
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) toast(err.message, { variant: 'error' });
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
@@ -499,6 +506,13 @@ export function VersionsPanel({ bookingId, currentVersion, onReverted }) {
   const [reloadToken, setReloadToken] = useState(0);
   const { toast } = useToast();
 
+  const requestKey = `${bookingId}|${reloadToken}`;
+  const [activeKey, setActiveKey] = useState(requestKey);
+  if (requestKey !== activeKey) {
+    setActiveKey(requestKey);
+    setLoading(true);
+  }
+
   const sectionOptions = [
     { value: 'reference', label: 'Reference & Budget' },
     { value: 'client', label: 'Client & Campaign' },
@@ -515,12 +529,22 @@ export function VersionsPanel({ bookingId, currentVersion, onReverted }) {
     .map(([value, label]) => ({ value, label }));
 
   useEffect(() => {
-    setLoading(true);
-    api
-      .get(`/api/bookings/${bookingId}/versions`)
-      .then(setVersions)
-      .catch((err) => toast(err.message, { variant: 'error' }))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await api.get(`/api/bookings/${bookingId}/versions`);
+        if (!cancelled) setVersions(data);
+      } catch (err) {
+        if (!cancelled) toast(err.message, { variant: 'error' });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [bookingId, toast, reloadToken]);
 
   useDataRefresh(() => setReloadToken((n) => n + 1));

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Modal } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
@@ -273,6 +273,10 @@ export function DocumentImportDialog({
     () => (existingFiles || []).filter((f) => !f.is_removed && isParseableFile(f)),
     [existingFiles]
   );
+  const parseableIds = useMemo(
+    () => parseableExisting.map((f) => f.id),
+    [parseableExisting]
+  );
   const preferExisting = parseableExisting.length > 0;
 
   const reset = () => {
@@ -282,18 +286,20 @@ export function DocumentImportDialog({
     setSheetName('');
     setFile(null);
     setSourceFileIds([]);
-    setSelectedDocIds(parseableExisting.map((f) => f.id));
+    setSelectedDocIds(parseableIds);
     setSelected({});
     setOverwrite(true);
     setAddSites(true);
     setUseAi(false);
   };
 
-  useEffect(() => {
-    if (open) {
-      setSelectedDocIds(parseableExisting.map((f) => f.id));
-    }
-  }, [open, parseableExisting]);
+  // Seed selection when the dialog opens or the parseable file list changes.
+  const selectionSeed = open ? parseableIds.join('\0') : '';
+  const [syncedSelectionSeed, setSyncedSelectionSeed] = useState('');
+  if (selectionSeed !== syncedSelectionSeed) {
+    setSyncedSelectionSeed(selectionSeed);
+    if (open) setSelectedDocIds(parseableIds);
+  }
 
   const close = (next) => {
     if (!next) reset();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
@@ -16,6 +16,7 @@ import {
   entryCoversDate,
   formatsOnDate,
   formatLiveDate,
+  liveEntryKey,
   scheduleAddedByMeta,
   SHOOT_DAY_COLOR,
   shootDatesFromSchedule,
@@ -458,40 +459,44 @@ export function CalendarSection({
 }) {
   const liveFormats = useMemo(() => uniqueLiveFormats(entries), [entries]);
   const shootDates = useMemo(() => shootDatesFromSchedule(entries), [entries]);
-  const colorMapRef = useRef(new Map());
-  const colorByKey = useMemo(() => {
-    const next = assignDistinctLaneColors(liveFormats, colorMapRef.current);
-    colorMapRef.current = next;
-    return next;
-  }, [liveFormats]);
+  const liveFormatsKey = useMemo(
+    () => liveFormats.map((entry) => liveEntryKey(entry)).join('|'),
+    [liveFormats]
+  );
+  const [colorByKey, setColorByKey] = useState(() => new Map());
+  const [syncedFormatsKey, setSyncedFormatsKey] = useState('');
+  if (liveFormatsKey !== syncedFormatsKey) {
+    setSyncedFormatsKey(liveFormatsKey);
+    setColorByKey((prev) => assignDistinctLaneColors(liveFormats, prev));
+  }
 
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(null);
   const [didAutoFocus, setDidAutoFocus] = useState(false);
   const [dayModalOpen, setDayModalOpen] = useState(false);
 
-  useEffect(() => {
-    if (didAutoFocus) return;
+  if (!didAutoFocus) {
     const firstLive = liveFormats[0];
     const firstShoot = [...shootDates].sort()[0];
     const start = String(firstLive?.live_start || firstShoot || '').slice(0, 10);
-    if (!start) return;
-    setCursor(startOfMonth(new Date(`${start}T12:00:00`)));
-    let pick = start;
-    if (firstLive) {
-      for (const dayOffset of [0, 1, 2, 3, 4, 5, 6]) {
-        const d = new Date(`${start}T12:00:00`);
-        d.setDate(d.getDate() + dayOffset);
-        const key = toKey(d);
-        if (formatsOnDate(entries, key, liveFormats).length >= 2) {
-          pick = key;
-          break;
+    if (start) {
+      let pick = start;
+      if (firstLive) {
+        for (const dayOffset of [0, 1, 2, 3, 4, 5, 6]) {
+          const d = new Date(`${start}T12:00:00`);
+          d.setDate(d.getDate() + dayOffset);
+          const key = toKey(d);
+          if (formatsOnDate(entries, key, liveFormats).length >= 2) {
+            pick = key;
+            break;
+          }
         }
       }
+      setDidAutoFocus(true);
+      setCursor(startOfMonth(new Date(`${start}T12:00:00`)));
+      setSelected(pick);
     }
-    setSelected(pick);
-    setDidAutoFocus(true);
-  }, [didAutoFocus, entries, liveFormats, shootDates]);
+  }
 
   const days = useMemo(() => {
     const first = startOfMonth(cursor);

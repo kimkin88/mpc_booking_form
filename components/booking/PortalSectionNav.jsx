@@ -65,11 +65,14 @@ const NavLink = styled.a`
  */
 export function PortalSectionNav({ sections = [] }) {
   const sectionIds = useMemo(() => sections.map((s) => s.id).join('|'), [sections]);
-  const [activeId, setActiveId] = useState(sections[0]?.id || null);
+  const firstSectionId = sections[0]?.id || null;
+  const [activeId, setActiveId] = useState(firstSectionId);
+  const [syncedSectionIds, setSyncedSectionIds] = useState(sectionIds);
 
-  useEffect(() => {
-    setActiveId(sections[0]?.id || null);
-  }, [sectionIds, sections]);
+  if (sectionIds !== syncedSectionIds) {
+    setSyncedSectionIds(sectionIds);
+    setActiveId(firstSectionId);
+  }
 
   useEffect(() => {
     if (!sections.length) return undefined;

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Badge, EmptyState } from '@/components/ui/Tabs';
 import { RemoveIconButton } from '@/components/ui/IconButton';
+import { ScrollArea } from '@/components/ui/ScrollArea';
 import { Grid, Row } from '@/components/layout/PageHeader';
 import {
   colorForLiveEntry,
@@ -19,16 +20,42 @@ import { MARKET_CITIES } from '@/lib/rateCard';
 import { toDateInputValue } from '@/utils/format';
 
 const SectionLabel = styled.h4`
-  margin: ${({ theme }) => theme.space[4]} 0 ${({ theme }) => theme.space[2]};
+  margin: 0 0 ${({ theme }) => theme.space[2]};
   font-size: ${({ theme }) => theme.fontSizes.sm};
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
   color: ${({ theme }) => theme.colors.textMuted};
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  flex-shrink: 0;
+`;
 
-  &:first-child {
-    margin-top: 0;
+const SectionBlock = styled.div`
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 0;
+`;
+
+const SectionScroll = styled(ScrollArea)`
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: -0.25rem;
+  padding-right: 0.25rem;
+
+  && {
+    height: 100%;
+    min-height: 7rem;
+    max-height: 100%;
   }
+`;
+
+const DayModalLayout = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.space[4]};
+  min-height: 0;
+  flex: 1 1 auto;
+  height: min(72vh, calc(100vh - 12rem));
 `;
 
 const ActionRow = styled.div`
@@ -78,18 +105,18 @@ const Dot = styled.span`
   flex-shrink: 0;
 `;
 
-const FieldError = styled.p`
-  margin: 0.5rem 0 0;
-  color: ${({ theme }) => theme.colors.danger};
-  font-size: ${({ theme }) => theme.fontSizes.sm};
-`;
-
 const AddPanel = styled.div`
-  margin-top: ${({ theme }) => theme.space[3]};
   padding: ${({ theme }) => theme.space[4]};
   border: 1px dashed ${({ theme }) => theme.colors.borderStrong};
   border-radius: ${({ theme }) => theme.radii.md};
   background: ${({ theme }) => theme.colors.bgMuted};
+`;
+
+const FieldError = styled.p`
+  margin: 0;
+  flex-shrink: 0;
+  color: ${({ theme }) => theme.colors.danger};
+  font-size: ${({ theme }) => theme.fontSizes.sm};
 `;
 
 const KindField = styled.div`
@@ -190,21 +217,23 @@ export function CalendarDayModal({
   onAdd,
   onUpdate,
 }) {
-  const [addKind, setAddKind] = useState('live_format');
+  const [addKind, setAddKind] = useState(() => 'live_format');
   const [liveDraft, setLiveDraft] = useState(() => emptyLiveDraft(dateKey));
   const [shootDraft, setShootDraft] = useState(() => emptyShootDraft(dateKey));
-  const [editingId, setEditingId] = useState(null);
-  const [editRange, setEditRange] = useState({ live_start: '', live_end: '', format: '', notes: '' });
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(() => null);
+  const [editRange, setEditRange] = useState(() => ({ live_start: '', live_end: '', format: '', notes: '' }));
+  const [error, setError] = useState(() => '');
+  const [busy, setBusy] = useState(() => false);
 
   useEffect(() => {
     if (!open || !dateKey) return;
-    setAddKind('live_format');
-    setLiveDraft(emptyLiveDraft(dateKey));
-    setShootDraft(emptyShootDraft(dateKey));
-    setEditingId(null);
-    setError('');
+    return () => {
+      setAddKind('live_format');
+      setLiveDraft(emptyLiveDraft(dateKey));
+      setShootDraft(emptyShootDraft(dateKey));
+      setEditingId(null);
+      setError('');
+    };
   }, [open, dateKey]);
 
   const title = useMemo(() => {
@@ -322,262 +351,291 @@ export function CalendarDayModal({
         </Button>
       }
     >
-      <SectionLabel>Actions this day</SectionLabel>
-      {dayEntries.length === 0 ? (
-        <EmptyState style={{ padding: '1rem' }}>Nothing on this day yet.</EmptyState>
-      ) : (
-        dayEntries.map(({ entry, kind }) => {
-          if (kind === 'shoot') {
-            const who = scheduleAddedByMeta(entry);
-            const length = Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
-            return (
-              <ActionRow key={entry.id || `shoot-${entry.shoot_date}`} $soft="#F8EDE8">
-                <ActionMain>
-                  <ActionTitle $text="#B45A3C">
-                    <Dot $color={SHOOT_DAY_COLOR} />
-                    Shoot · {length}
-                    {entry.city ? ` · ${entry.city}` : ''}
-                  </ActionTitle>
-                  <ActionMeta>
-                    {formatLiveDate(entry.shoot_date, locale)}
-                    {who.name ? ` · ${who.label}: ${who.name}` : ` · ${who.label}`}
-                  </ActionMeta>
-                </ActionMain>
-                <ActionControls>
-                  <Badge $tone={who.tone}>{who.label}</Badge>
-                  {onRemoveFromDay && entry.id && (
-                    <RemoveIconButton
-                      disabled={busy}
-                      label="Remove from this day"
-                      title="Remove from this day"
-                      onClick={() => run(() => onRemoveFromDay(entry.id, dateKey))}
-                    />
-                  )}
-                </ActionControls>
-              </ActionRow>
-            );
-          }
+      <DayModalLayout>
+        <SectionBlock>
+          <SectionLabel>Actions this day</SectionLabel>
+          <SectionScroll type="scroll">
+            {dayEntries.length === 0 ? (
+              <EmptyState style={{ padding: '1rem' }}>Nothing on this day yet.</EmptyState>
+            ) : (
+              dayEntries.map(({ entry, kind }) => {
+                if (kind === 'shoot') {
+                  const who = scheduleAddedByMeta(entry);
+                  const length = Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
+                  return (
+                    <ActionRow key={entry.id || `shoot-${entry.shoot_date}`} $soft="#F8EDE8">
+                      <ActionMain>
+                        <ActionTitle $text="#B45A3C">
+                          <Dot $color={SHOOT_DAY_COLOR} />
+                          Shoot · {length}
+                          {entry.city ? ` · ${entry.city}` : ''}
+                        </ActionTitle>
+                        <ActionMeta>
+                          {formatLiveDate(entry.shoot_date, locale)}
+                          {who.name ? ` · ${who.label}: ${who.name}` : ` · ${who.label}`}
+                        </ActionMeta>
+                      </ActionMain>
+                      <ActionControls>
+                        <Badge $tone={who.tone}>{who.label}</Badge>
+                        {onRemoveFromDay && entry.id && (
+                          <RemoveIconButton
+                            disabled={busy}
+                            label="Remove from this day"
+                            title="Remove from this day"
+                            onClick={() => run(() => onRemoveFromDay(entry.id, dateKey))}
+                          />
+                        )}
+                      </ActionControls>
+                    </ActionRow>
+                  );
+                }
 
-          const color = colorForLiveEntry(entry, colorByKey);
-          const multiDay =
-            String(entry.live_start || '').slice(0, 10) !==
-            String(entry.live_end || entry.live_start || '').slice(0, 10);
-          const isEditing = editingId === entry.id;
+                const color = colorForLiveEntry(entry, colorByKey);
+                const multiDay =
+                  String(entry.live_start || '').slice(0, 10) !==
+                  String(entry.live_end || entry.live_start || '').slice(0, 10);
+                const isEditing = editingId === entry.id;
 
-          return (
-            <ActionRow key={entry.id || `${entry.format}-${entry.live_start}`} $soft={color.soft}>
-              <ActionMain style={{ width: '100%' }}>
-                <Row style={{ justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
-                  <div>
-                    <ActionTitle $text={color.text}>
-                      <Dot $color={color.bar} />
-                      {entry.format}
-                    </ActionTitle>
-                    <ActionMeta>
-                      Live: {formatLiveDate(entry.live_start, locale)} →{' '}
-                      {formatLiveDate(entry.live_end, locale)}
-                    </ActionMeta>
-                  </div>
-                  <ActionControls>
-                    {onUpdate && entry.id && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => (isEditing ? setEditingId(null) : startEdit(entry))}
-                      >
-                        {isEditing ? 'Cancel' : 'Edit'}
-                      </Button>
-                    )}
-                    {onRemoveFromDay && entry.id && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => run(() => onRemoveFromDay(entry.id, dateKey))}
-                        title="Remove this action from the selected day only"
-                      >
-                        Remove from this day
-                      </Button>
-                    )}
-                    {onDeleteEntry && entry.id && (
-                      <RemoveIconButton
-                        disabled={busy}
-                        label={
-                          multiDay
-                            ? 'Remove entire action from calendar (all days in this range)'
-                            : 'Remove entire action from calendar'
-                        }
-                        onClick={() => {
-                          if (
-                            multiDay &&
-                            !window.confirm(
-                              `Delete the entire “${entry.format}” range (${formatLiveDate(entry.live_start, locale)} – ${formatLiveDate(entry.live_end, locale)})?`
-                            )
-                          ) {
-                            return;
-                          }
-                          run(() => onDeleteEntry(entry.id));
+                return (
+                  <ActionRow key={entry.id || `${entry.format}-${entry.live_start}`} $soft={color.soft}>
+                    <ActionMain style={{ width: '100%' }}>
+                      <Row
+                        style={{
+                          justifyContent: 'space-between',
+                          gap: '0.75rem',
+                          alignItems: 'flex-start',
                         }}
-                      />
-                    )}
-                  </ActionControls>
-                </Row>
+                      >
+                        <div>
+                          <ActionTitle $text={color.text}>
+                            <Dot $color={color.bar} />
+                            {entry.format}
+                          </ActionTitle>
+                          <ActionMeta>
+                            Live: {formatLiveDate(entry.live_start, locale)} →{' '}
+                            {formatLiveDate(entry.live_end, locale)}
+                          </ActionMeta>
+                        </div>
+                        <ActionControls>
+                          {onUpdate && entry.id && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => (isEditing ? setEditingId(null) : startEdit(entry))}
+                            >
+                              {isEditing ? 'Cancel' : 'Edit'}
+                            </Button>
+                          )}
+                          {onRemoveFromDay && entry.id && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => run(() => onRemoveFromDay(entry.id, dateKey))}
+                              title="Remove this action from the selected day only"
+                            >
+                              Remove from this day
+                            </Button>
+                          )}
+                          {onDeleteEntry && entry.id && (
+                            <RemoveIconButton
+                              disabled={busy}
+                              label={
+                                multiDay
+                                  ? 'Remove entire action from calendar (all days in this range)'
+                                  : 'Remove entire action from calendar'
+                              }
+                              onClick={() => {
+                                if (
+                                  multiDay &&
+                                  !window.confirm(
+                                    `Delete the entire “${entry.format}” range (${formatLiveDate(entry.live_start, locale)} – ${formatLiveDate(entry.live_end, locale)})?`
+                                  )
+                                ) {
+                                  return;
+                                }
+                                run(() => onDeleteEntry(entry.id));
+                              }}
+                            />
+                          )}
+                        </ActionControls>
+                      </Row>
 
-                {isEditing && (
-                  <div style={{ marginTop: '0.85rem' }}>
-                    <Grid $cols={2}>
-                      <Input
-                        label="Format"
-                        required
-                        value={editRange.format}
-                        onChange={(e) => setEditRange((d) => ({ ...d, format: e.target.value }))}
-                        disabled={busy}
-                      />
-                      <Input
-                        label="Notes"
-                        value={editRange.notes}
-                        onChange={(e) => setEditRange((d) => ({ ...d, notes: e.target.value }))}
-                        disabled={busy}
-                      />
-                      <Input
-                        label="Start"
-                        type="date"
-                        required
-                        value={editRange.live_start}
-                        onChange={(e) => setEditRange((d) => ({ ...d, live_start: e.target.value }))}
-                        disabled={busy}
-                      />
-                      <Input
-                        label="End"
-                        type="date"
-                        required
-                        value={editRange.live_end}
-                        onChange={(e) => setEditRange((d) => ({ ...d, live_end: e.target.value }))}
-                        disabled={busy}
-                      />
-                    </Grid>
-                    <Row style={{ marginTop: '0.75rem', justifyContent: 'flex-end' }}>
-                      <Button type="button" size="sm" disabled={busy} onClick={() => saveEdit(entry)}>
-                        Save changes
-                      </Button>
-                    </Row>
-                  </div>
-                )}
-              </ActionMain>
-            </ActionRow>
-          );
-        })
-      )}
+                      {isEditing && (
+                        <div style={{ marginTop: '0.85rem' }}>
+                          <Grid $cols={2}>
+                            <Input
+                              label="Format"
+                              required
+                              value={editRange.format}
+                              onChange={(e) =>
+                                setEditRange((d) => ({ ...d, format: e.target.value }))
+                              }
+                              disabled={busy}
+                            />
+                            <Input
+                              label="Notes"
+                              value={editRange.notes}
+                              onChange={(e) =>
+                                setEditRange((d) => ({ ...d, notes: e.target.value }))
+                              }
+                              disabled={busy}
+                            />
+                            <Input
+                              label="Start"
+                              type="date"
+                              required
+                              value={editRange.live_start}
+                              onChange={(e) =>
+                                setEditRange((d) => ({ ...d, live_start: e.target.value }))
+                              }
+                              disabled={busy}
+                            />
+                            <Input
+                              label="End"
+                              type="date"
+                              required
+                              value={editRange.live_end}
+                              onChange={(e) =>
+                                setEditRange((d) => ({ ...d, live_end: e.target.value }))
+                              }
+                              disabled={busy}
+                            />
+                          </Grid>
+                          <Row style={{ marginTop: '0.75rem', justifyContent: 'flex-end' }}>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => saveEdit(entry)}
+                            >
+                              Save changes
+                            </Button>
+                          </Row>
+                        </div>
+                      )}
+                    </ActionMain>
+                  </ActionRow>
+                );
+              })
+            )}
+          </SectionScroll>
+        </SectionBlock>
 
-      <SectionLabel>Add action</SectionLabel>
-      <AddPanel>
-        <KindField>
-          <KindLabel>What to add</KindLabel>
-          <KindHint>
-            Choose a live media format (can span several days) or a shoot requirement for a single
-            day.
-          </KindHint>
-          <KindToggle role="group" aria-label="What to add">
-            <KindButton
-              type="button"
-              $active={addKind === 'live_format'}
-              disabled={busy || !onAdd}
-              aria-pressed={addKind === 'live_format'}
-              onClick={() => setAddKind('live_format')}
-            >
-              <strong>Live format</strong>
-              <span>Bars on the calendar · date range</span>
-            </KindButton>
-            <KindButton
-              type="button"
-              $active={addKind === 'shoot'}
-              disabled={busy || !onAdd}
-              aria-pressed={addKind === 'shoot'}
-              onClick={() => setAddKind('shoot')}
-            >
-              <strong>Shoot day</strong>
-              <span>Orange day number · one date</span>
-            </KindButton>
-          </KindToggle>
-        </KindField>
+        <SectionBlock>
+          <SectionLabel>Add action</SectionLabel>
+          <SectionScroll type="scroll">
+            <AddPanel>
+              <KindField>
+                <KindLabel>What to add</KindLabel>
+                <KindHint>
+                  Choose a live media format (can span several days) or a shoot requirement for a
+                  single day.
+                </KindHint>
+                <KindToggle role="group" aria-label="What to add">
+                  <KindButton
+                    type="button"
+                    $active={addKind === 'live_format'}
+                    disabled={busy || !onAdd}
+                    aria-pressed={addKind === 'live_format'}
+                    onClick={() => setAddKind('live_format')}
+                  >
+                    <strong>Live format</strong>
+                    <span>Bars on the calendar · date range</span>
+                  </KindButton>
+                  <KindButton
+                    type="button"
+                    $active={addKind === 'shoot'}
+                    disabled={busy || !onAdd}
+                    aria-pressed={addKind === 'shoot'}
+                    onClick={() => setAddKind('shoot')}
+                  >
+                    <strong>Shoot day</strong>
+                    <span>Orange day number · one date</span>
+                  </KindButton>
+                </KindToggle>
+              </KindField>
 
-        {addKind === 'live_format' ? (
-          <Grid $cols={2} style={{ marginTop: '0.75rem' }}>
-            <Input
-              label="Format name"
-              required
-              placeholder="e.g. 6-Sheet"
-              value={liveDraft.format}
-              onChange={(e) => setLiveDraft((d) => ({ ...d, format: e.target.value }))}
-              disabled={busy || !onAdd}
-            />
-            <Input
-              label="Notes"
-              value={liveDraft.notes}
-              onChange={(e) => setLiveDraft((d) => ({ ...d, notes: e.target.value }))}
-              disabled={busy || !onAdd}
-            />
-            <Input
-              label="Start date"
-              type="date"
-              required
-              value={liveDraft.live_start}
-              onChange={(e) => setLiveDraft((d) => ({ ...d, live_start: e.target.value }))}
-              disabled={busy || !onAdd}
-            />
-            <Input
-              label="End date"
-              type="date"
-              required
-              value={liveDraft.live_end}
-              onChange={(e) => setLiveDraft((d) => ({ ...d, live_end: e.target.value }))}
-              disabled={busy || !onAdd}
-              hint="Same as start for a single day"
-            />
-          </Grid>
-        ) : (
-          <Grid $cols={3} style={{ marginTop: '0.75rem' }}>
-            <Select
-              label="Day length"
-              required
-              value={shootDraft.day_length}
-              onValueChange={(v) => setShootDraft((d) => ({ ...d, day_length: v }))}
-              options={[
-                { value: '0.5', label: '0.5 day' },
-                { value: '1', label: '1 day' },
-              ]}
-              disabled={busy || !onAdd}
-            />
-            <Select
-              label="City"
-              required
-              value={shootDraft.city}
-              onValueChange={(v) => setShootDraft((d) => ({ ...d, city: v }))}
-              options={cityOptions}
-              disabled={busy || !onAdd}
-            />
-            <Input
-              label="Shoot date"
-              type="date"
-              required
-              value={shootDraft.shoot_date}
-              onChange={(e) => setShootDraft((d) => ({ ...d, shoot_date: e.target.value }))}
-              disabled={busy || !onAdd}
-            />
-          </Grid>
-        )}
+              {addKind === 'live_format' ? (
+                <Grid $cols={2} style={{ marginTop: '0.75rem' }}>
+                  <Input
+                    label="Format name"
+                    required
+                    placeholder="e.g. 6-Sheet"
+                    value={liveDraft.format}
+                    onChange={(e) => setLiveDraft((d) => ({ ...d, format: e.target.value }))}
+                    disabled={busy || !onAdd}
+                  />
+                  <Input
+                    label="Notes"
+                    value={liveDraft.notes}
+                    onChange={(e) => setLiveDraft((d) => ({ ...d, notes: e.target.value }))}
+                    disabled={busy || !onAdd}
+                  />
+                  <Input
+                    label="Start date"
+                    type="date"
+                    required
+                    value={liveDraft.live_start}
+                    onChange={(e) => setLiveDraft((d) => ({ ...d, live_start: e.target.value }))}
+                    disabled={busy || !onAdd}
+                  />
+                  <Input
+                    label="End date"
+                    type="date"
+                    required
+                    value={liveDraft.live_end}
+                    onChange={(e) => setLiveDraft((d) => ({ ...d, live_end: e.target.value }))}
+                    disabled={busy || !onAdd}
+                    hint="Same as start for a single day"
+                  />
+                </Grid>
+              ) : (
+                <Grid $cols={3} style={{ marginTop: '0.75rem' }}>
+                  <Select
+                    label="Day length"
+                    required
+                    value={shootDraft.day_length}
+                    onValueChange={(v) => setShootDraft((d) => ({ ...d, day_length: v }))}
+                    options={[
+                      { value: '0.5', label: '0.5 day' },
+                      { value: '1', label: '1 day' },
+                    ]}
+                    disabled={busy || !onAdd}
+                  />
+                  <Select
+                    label="City"
+                    required
+                    value={shootDraft.city}
+                    onValueChange={(v) => setShootDraft((d) => ({ ...d, city: v }))}
+                    options={cityOptions}
+                    disabled={busy || !onAdd}
+                  />
+                  <Input
+                    label="Shoot date"
+                    type="date"
+                    required
+                    value={shootDraft.shoot_date}
+                    onChange={(e) => setShootDraft((d) => ({ ...d, shoot_date: e.target.value }))}
+                    disabled={busy || !onAdd}
+                  />
+                </Grid>
+              )}
 
-        <Row style={{ marginTop: '0.85rem', justifyContent: 'flex-end' }}>
-          <Button type="button" onClick={handleAdd} disabled={busy || !onAdd} loading={busy}>
-            Add to calendar
-          </Button>
-        </Row>
-      </AddPanel>
+              <Row style={{ marginTop: '0.85rem', justifyContent: 'flex-end' }}>
+                <Button type="button" onClick={handleAdd} disabled={busy || !onAdd} loading={busy}>
+                  Add to calendar
+                </Button>
+              </Row>
+            </AddPanel>
+          </SectionScroll>
+        </SectionBlock>
 
-      {error && <FieldError role="alert">{error}</FieldError>}
+        {error && <FieldError role="alert">{error}</FieldError>}
+      </DayModalLayout>
     </Modal>
   );
 }
