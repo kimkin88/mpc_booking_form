@@ -106,6 +106,7 @@ export function ShootRequirementsSection({
   onUpdate,
   onRemove,
   readOnly = false,
+  showCalendarHint = true,
   id,
 }) {
   const rates = useMemo(() => ratesFromBooking(booking), [booking]);
@@ -307,8 +308,10 @@ export function ShootRequirementsSection({
         {money(rates.halfDay, currency)} = 0.5 day.
         {budgetSet
           ? ' Use + to add a shoot row when remaining budget allows.'
-          : ' Set a shoot budget above before adding shoot rows.'}{' '}
-        Preferred dates also appear on the Calendar tab (orange day numbers).
+          : ' Set a shoot budget above before adding shoot rows.'}
+        {showCalendarHint
+          ? ' Preferred dates also appear on the Calendar tab (orange day numbers).'
+          : null}
       </SectionHint>
 
       <BudgetBar>

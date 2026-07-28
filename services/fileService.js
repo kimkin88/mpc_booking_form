@@ -622,7 +622,7 @@ export async function restoreFile({ fileId, actor }) {
 export async function updateFileMeta({ fileId, updates, actor }) {
   const supabase = createServiceClient();
   const allowed = {};
-  if (updates.description != null) allowed.description = updates.description;
+  if ('description' in updates) allowed.description = updates.description || null;
   if (updates.original_filename != null) allowed.original_filename = updates.original_filename;
   if (updates.status != null) allowed.status = updates.status;
   if (updates.category != null) allowed.category = updates.category;

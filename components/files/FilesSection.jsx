@@ -112,9 +112,21 @@ const FileMeta = styled.div`
   font-size: 0.8rem;
   color: ${({ theme }) => theme.colors.textMuted};
   margin-top: 0.25rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+`;
+
+const FileDescription = styled.div`
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
+  color: ${({ theme }) => theme.colors.text};
+  line-height: 1.35;
+  word-break: break-word;
+`;
+
+const DraftHint = styled.p`
+  margin: 0.35rem 0 0;
+  font-size: ${({ theme }) => theme.fontSizes.xs};
+  color: ${({ theme }) => theme.colors.textMuted};
+  line-height: 1.35;
 `;
 
 const FileCount = styled.span`
@@ -401,6 +413,7 @@ export function FilesSection({
 }) {
   const { toast } = useToast();
   const inputRefs = useRef({});
+  const descriptionsRef = useRef({});
   const categoryList = categories?.length ? categories : FILE_CATEGORIES;
   const [dragCategory, setDragCategory] = useState(null);
   const [uploadingCategory, setUploadingCategory] = useState(null);
@@ -412,6 +425,21 @@ export function FilesSection({
   const [versions, setVersions] = useState([]);
   const [preview, setPreview] = useState(null);
   const [pendingPreviews, setPendingPreviews] = useState([]);
+  const [editDescFile, setEditDescFile] = useState(null);
+  const [editDescValue, setEditDescValue] = useState('');
+  const [savingDesc, setSavingDesc] = useState(false);
+
+  useEffect(() => {
+    descriptionsRef.current = descriptions;
+  }, [descriptions]);
+
+  const setCategoryDescription = (category, value) => {
+    setDescriptions((prev) => {
+      const next = { ...prev, [category]: value };
+      descriptionsRef.current = next;
+      return next;
+    });
+  };
 
   const statusFor = (category) =>
     categoryStatuses.find((c) => c.category === category)?.status || 'missing';
@@ -482,7 +510,7 @@ export function FilesSection({
                 body: JSON.stringify({
                   action: 'prepare',
                   category,
-                  description: descriptions[category] || null,
+                  description: descriptionsRef.current[category] || null,
                   files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
                 }),
               });
@@ -495,7 +523,7 @@ export function FilesSection({
           : await api.post(filesEndpoint, {
               action: 'prepare',
               category,
-              description: descriptions[category] || null,
+              description: descriptionsRef.current[category] || null,
               files: list.map((f, index) => ({ ...fileMeta(f), clientId: String(index) })),
             });
 
@@ -546,7 +574,11 @@ export function FilesSection({
         } else if (slots.length || earlyFailures.length === 0) {
           toast('Files uploaded');
         }
-        setDescriptions((prev) => ({ ...prev, [category]: '' }));
+        setDescriptions((prev) => {
+          const next = { ...prev, [category]: '' };
+          descriptionsRef.current = next;
+          return next;
+        });
         await onRefresh?.();
       } catch (err) {
         setErrors([err.message]);
@@ -557,7 +589,7 @@ export function FilesSection({
         setTimeout(() => setProgress(0), 600);
       }
     },
-    [bookingId, clearPendingPreviews, descriptions, onRefresh, portalToken, toast]
+    [bookingId, clearPendingPreviews, onRefresh, portalToken, toast]
   );
 
   const onDrop = (category, e) => {
@@ -627,6 +659,49 @@ export function FilesSection({
       updates: { status },
     });
     await onRefresh?.();
+  };
+
+  const openEditDescription = (file) => {
+    setEditDescFile(file);
+    setEditDescValue(file.description || '');
+  };
+
+  const saveFileDescription = async () => {
+    if (!editDescFile) return;
+    setSavingDesc(true);
+    try {
+      const description = editDescValue.trim() || null;
+      if (portalToken) {
+        const res = await fetch(`/api/portal/${portalToken}/files`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update',
+            fileId: editDescFile.id,
+            updates: { description },
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.ok === false) {
+          throw new Error(json.error || 'Could not update description');
+        }
+      } else {
+        await api.patch(`/api/bookings/${bookingId}/files`, {
+          action: 'update',
+          fileId: editDescFile.id,
+          updates: { description },
+        });
+      }
+      toast('Description updated');
+      setEditDescFile(null);
+      await onRefresh?.();
+    } catch (err) {
+      const message = err.message || 'Could not update description';
+      setErrors([message]);
+      toast(message, { variant: 'error' });
+    } finally {
+      setSavingDesc(false);
+    }
   };
 
   const viewVersions = async (fileId) => {
@@ -796,12 +871,20 @@ export function FilesSection({
                 <>
                   <div style={{ marginBottom: '1rem' }}>
                     <Input
+                      id={`file-desc-${cat.value}`}
+                      name={`file-desc-${cat.value}`}
                       label={`${cat.label} description (optional)`}
                       value={descriptions[cat.value] || ''}
-                      onChange={(e) =>
-                        setDescriptions((prev) => ({ ...prev, [cat.value]: e.target.value }))
-                      }
+                      onChange={(e) => setCategoryDescription(cat.value, e.target.value)}
+                      placeholder="Shown on the uploaded file(s)"
+                      hint="Updates as you type — attached to the next upload in this category"
                     />
+                    {!!(descriptions[cat.value] || '').trim() && (
+                      <DraftHint>
+                        Next upload description:{' '}
+                        <strong style={{ color: 'inherit' }}>{descriptions[cat.value]}</strong>
+                      </DraftHint>
+                    )}
                   </div>
                   <DropZone
                     $active={dragCategory === cat.value}
@@ -892,8 +975,10 @@ export function FilesSection({
                     <FileMeta>
                       {file.mime_type} · {formatFileSize(file.file_size)} ·{' '}
                       {file.uploaded_by_name || 'Unknown'} · {formatDateTime(file.created_at)}
-                      {file.description ? ` · ${file.description}` : ''}
                     </FileMeta>
+                    {file.description ? (
+                      <FileDescription>{file.description}</FileDescription>
+                    ) : null}
                   </FileInfo>
                   <ActionsCell>
                     {isImageMime(file.mime_type) && (
@@ -933,6 +1018,9 @@ export function FilesSection({
                             !file.is_removed &&
                             (isAdmin || clientCanMutateFile(file)) && (
                               <>
+                                <MenuItem onSelect={() => openEditDescription(file)}>
+                                  Edit description
+                                </MenuItem>
                                 <MenuItem
                                   onSelect={() => {
                                     const input = document.createElement('input');
@@ -1027,6 +1115,39 @@ export function FilesSection({
             <img src={preview.url} alt={preview.name || 'File preview'} />
           </PreviewFrame>
         )}
+      </Modal>
+
+      <Modal
+        open={!!editDescFile}
+        onOpenChange={(open) => {
+          if (!open && !savingDesc) setEditDescFile(null);
+        }}
+        title="Edit description"
+        description={editDescFile?.original_filename || undefined}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={savingDesc}
+              onClick={() => setEditDescFile(null)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" disabled={savingDesc} onClick={saveFileDescription}>
+              {savingDesc ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          id="edit-file-description"
+          name="edit-file-description"
+          label="Description"
+          value={editDescValue}
+          onChange={(e) => setEditDescValue(e.target.value)}
+          placeholder="Optional note shown with this file"
+        />
       </Modal>
     </Section>
   );

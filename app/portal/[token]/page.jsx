@@ -935,6 +935,7 @@ export default function PortalPage() {
                 booking={form}
                 entries={shootRequirementsFromSchedule(data.schedule)}
                 readOnly={readOnly || fieldDisabled.schedule}
+                showCalendarHint={false}
                 onAdd={async (entry) => {
                   await portalRequest(`/api/portal/${token}/booking`, {
                     method: 'PATCH',

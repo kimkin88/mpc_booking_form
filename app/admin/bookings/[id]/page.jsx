@@ -884,14 +884,16 @@ export default function BookingDetailPage() {
                       toast('Site removed');
                       await refreshRelated();
                     }}
-                    onRemoveAll={async () => {
+                    onRemoveAll={async (type) => {
                       const result = await api.delete(`/api/bookings/${id}/sites`, {
                         removeAll: true,
+                        type,
                       });
+                      const kind = type === 'avoid' ? 'avoid' : 'must-shoot';
                       toast(
                         result?.count
-                          ? `Removed ${result.count} site${result.count === 1 ? '' : 's'}`
-                          : 'All sites removed'
+                          ? `Removed ${result.count} ${kind} site${result.count === 1 ? '' : 's'}`
+                          : `All ${kind} sites removed`
                       );
                       await refreshRelated();
                     }}

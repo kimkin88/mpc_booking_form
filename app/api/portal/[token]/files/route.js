@@ -14,6 +14,7 @@ import {
   prepareDirectReplace,
   completeDirectReplace,
   softDeleteFile,
+  updateFileMeta,
   getSignedDownloadUrl,
 } from '@/services/fileService';
 import { clientActorFromBooking } from '@/utils/helpers';
@@ -94,6 +95,61 @@ export async function POST(request, { params }) {
     }
 
     return jsonError('Unknown action', 400);
+  } catch (err) {
+    return jsonError(err.message, err.code === 'FORBIDDEN' ? 403 : 500, { code: err.code });
+  }
+}
+
+export async function PATCH(request, { params }) {
+  try {
+    const { token } = await params;
+    const gate = await requirePortalFromRequest(token, { recordAccess: false });
+    if (gate.error) return gate.error;
+
+    const { portal, booking } = gate.resolved;
+    const viewerIsAdmin = await portalViewerIsAdmin();
+    if (!viewerIsAdmin && !isPortalEditable(portal, booking.status)) {
+      return jsonError('Portal is read-only', 403);
+    }
+
+    const full = await getBooking(booking.id);
+    const permissionsMap = permissionsArrayToMap(full.permissions);
+    if (!canClientEdit(getFieldPermission(permissionsMap, 'files'))) {
+      return jsonError('File edits are not permitted', 403);
+    }
+
+    const body = await request.json();
+    if (body.action !== 'update') return jsonError('Unknown action', 400);
+    if (!body.fileId) return jsonError('fileId is required', 400);
+
+    const existing = (full.files || []).find((f) => f.id === body.fileId && !f.is_removed);
+    if (!existing) return jsonError('File not found', 404);
+
+    if (existing.status === 'under_review') {
+      return jsonError('This file is under review and cannot be changed', 403, {
+        code: 'UNDER_REVIEW',
+      });
+    }
+    if (existing.status === 'approved') {
+      return jsonError('This file is approved and cannot be changed', 403, {
+        code: 'APPROVED',
+      });
+    }
+    if (existing.uploaded_via !== 'client_portal') {
+      return jsonError('You can only edit files you uploaded', 403, { code: 'FORBIDDEN' });
+    }
+
+    const updates = body.updates || {};
+    if (!('description' in updates)) {
+      return jsonError('Only description updates are allowed', 400);
+    }
+
+    const data = await updateFileMeta({
+      fileId: body.fileId,
+      updates: { description: updates.description },
+      actor: clientActorFromBooking(full.booking || booking),
+    });
+    return jsonOk(data);
   } catch (err) {
     return jsonError(err.message, err.code === 'FORBIDDEN' ? 403 : 500, { code: err.code });
   }

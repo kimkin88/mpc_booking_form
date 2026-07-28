@@ -335,12 +335,22 @@ const TodayLegendDot = styled.span`
 `;
 
 const EntryCard = styled.div`
-  border: 1px solid ${({ theme }) => theme.colors.border};
+  border: 1px solid
+    ${({ theme, $variant }) =>
+      $variant === 'draft' ? theme.colors.borderStrong : theme.colors.border};
+  border-style: ${({ $variant }) => ($variant === 'draft' ? 'dashed' : 'solid')};
   border-radius: ${({ theme }) => theme.radii.md};
   padding: ${({ theme }) => theme.space[4]};
   margin-bottom: ${({ theme }) => theme.space[3]};
-  background: ${({ theme }) => theme.colors.surface};
+  background: ${({ theme, $variant }) =>
+    $variant === 'draft' ? theme.colors.bgMuted : theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
+`;
+
+const AddRow = styled.div`
+  display: flex;
+  justify-content: flex-start;
+  margin-top: ${({ theme }) => theme.space[2]};
 `;
 
 const EntryTitle = styled.p`
@@ -369,7 +379,7 @@ const EntryMeta = styled.dl`
 `;
 
 const FieldError = styled.p`
-  margin: 0;
+  margin: 0.5rem 0 0;
   color: ${({ theme }) => theme.colors.danger};
   font-size: ${({ theme }) => theme.fontSizes.sm};
 `;
@@ -700,15 +710,19 @@ export function SitesSection({
   fieldHidden = {},
   id,
 }) {
-  const [draft, setDraft] = useState({
+  const emptyDraft = () => ({
     type: 'must_shoot',
     site_name: '',
     location: '',
     notes: '',
     reference_url: '',
   });
+
+  const [draft, setDraft] = useState(emptyDraft);
+  const [draftOpen, setDraftOpen] = useState(false);
   const [error, setError] = useState('');
-  const [removingAll, setRemovingAll] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [removingType, setRemovingType] = useState(null);
 
   const showToggle = !fieldHidden.mpc_chooses_sites;
   const showSites = !fieldHidden.sites;
@@ -719,6 +733,12 @@ export function SitesSection({
   const mpcChooses = values.mpc_chooses_sites !== false;
   const needsSiteInstructions = showSites && !mpcChooses && sites.length === 0;
   const canEditSites = showSites && !readOnly && !fieldDisabled.sites;
+
+  const openDraft = () => {
+    setError('');
+    setDraft(emptyDraft());
+    setDraftOpen(true);
+  };
 
   const handleAdd = async () => {
     setError('');
@@ -734,42 +754,46 @@ export function SitesSection({
         return;
       }
     }
+    setSaving(true);
     try {
       await onAdd({
         ...draft,
         reference_url: draft.reference_url || null,
       });
-      setDraft({
-        type: 'must_shoot',
-        site_name: '',
-        location: '',
-        notes: '',
-        reference_url: '',
-      });
+      setDraft(emptyDraft());
+      setDraftOpen(false);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleRemoveAll = async () => {
-    if (!sites.length) return;
-    if (!window.confirm(`Remove all ${sites.length} site${sites.length === 1 ? '' : 's'}?`)) {
+  const handleRemoveAll = async (type) => {
+    const list = type === 'avoid' ? avoid : mustShoot;
+    if (!list.length) return;
+    const kind = type === 'avoid' ? 'avoid' : 'must-shoot';
+    if (
+      !window.confirm(
+        `Remove all ${list.length} ${kind} site${list.length === 1 ? '' : 's'}?`
+      )
+    ) {
       return;
     }
     setError('');
-    setRemovingAll(true);
+    setRemovingType(type);
     try {
       if (onRemoveAll) {
-        await onRemoveAll();
+        await onRemoveAll(type);
       } else if (onRemove) {
-        for (const site of sites) {
+        for (const site of list) {
           await onRemove(site.id);
         }
       }
     } catch (err) {
       setError(err.message);
     } finally {
-      setRemovingAll(false);
+      setRemovingType(null);
     }
   };
 
@@ -778,8 +802,8 @@ export function SitesSection({
       <SectionTitle>Sites</SectionTitle>
       <SectionHint>
         MPC Chooses Sites is enabled by default. When disabled, provide at least one Must-Shoot
-        Site or other site instruction. Each site may include a name, location, notes, and optional
-        reference link.
+        Site or other site instruction. Use + to add a site with name, location, notes, and an
+        optional reference link.
       </SectionHint>
 
       {showToggle && (
@@ -813,14 +837,14 @@ export function SitesSection({
               Must-Shoot Sites
               {!mpcChooses && <RequiredMark> *</RequiredMark>}
             </h3>
-            {canEditSites && sites.length > 0 && (onRemove || onRemoveAll) && (
+            {canEditSites && mustShoot.length > 0 && (onRemove || onRemoveAll) && (
               <Button
                 type="button"
                 variant="danger"
                 size="sm"
-                onClick={handleRemoveAll}
-                loading={removingAll}
-                disabled={removingAll}
+                onClick={() => handleRemoveAll('must_shoot')}
+                loading={removingType === 'must_shoot'}
+                disabled={!!removingType || saving}
               >
                 Remove all
               </Button>
@@ -832,7 +856,10 @@ export function SitesSection({
               <Row style={{ justifyContent: 'space-between' }}>
                 <strong>{site.site_name}</strong>
                 {!readOnly && !fieldDisabled.sites && (
-                  <RemoveIconButton onClick={() => onRemove(site.id)} disabled={removingAll} />
+                  <RemoveIconButton
+                    onClick={() => onRemove(site.id)}
+                    disabled={!!removingType || saving}
+                  />
                 )}
               </Row>
               {site.location && (
@@ -849,14 +876,39 @@ export function SitesSection({
             </EntryCard>
           ))}
 
-          <h3 style={{ fontSize: '1rem', marginTop: '1.25rem' }}>Sites to Avoid</h3>
+          <Row
+            style={{
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginTop: '1.25rem',
+              marginBottom: '0.35rem',
+            }}
+          >
+            <h3 style={{ fontSize: '1rem', margin: 0 }}>Sites to Avoid</h3>
+            {canEditSites && avoid.length > 0 && (onRemove || onRemoveAll) && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => handleRemoveAll('avoid')}
+                loading={removingType === 'avoid'}
+                disabled={!!removingType || saving}
+              >
+                Remove all
+              </Button>
+            )}
+          </Row>
           {avoid.length === 0 && <EmptyState style={{ padding: '1rem' }}>None yet</EmptyState>}
           {avoid.map((site) => (
             <EntryCard key={site.id}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <strong>{site.site_name}</strong>
                 {!readOnly && !fieldDisabled.sites && (
-                  <RemoveIconButton onClick={() => onRemove(site.id)} disabled={removingAll} />
+                  <RemoveIconButton
+                    onClick={() => onRemove(site.id)}
+                    disabled={!!removingType || saving}
+                  />
                 )}
               </Row>
               {site.location && (
@@ -875,9 +927,8 @@ export function SitesSection({
         </div>
       )}
 
-      {showSites && !readOnly && !fieldDisabled.sites && (
-        <div style={{ marginTop: '1.25rem' }}>
-          <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Add site entry</h3>
+      {canEditSites && draftOpen && (
+        <EntryCard $variant="draft" style={{ marginTop: '1.25rem' }}>
           <Grid>
             <Select
               label="Type"
@@ -887,36 +938,68 @@ export function SitesSection({
                 { value: 'must_shoot', label: 'Must-Shoot' },
                 { value: 'avoid', label: 'Avoid' },
               ]}
+              disabled={saving}
             />
             <Input
               label="Site Name"
               required
               value={draft.site_name}
               onChange={(e) => setDraft((d) => ({ ...d, site_name: e.target.value }))}
+              disabled={saving}
             />
             <Input
               label="Location"
               value={draft.location}
               onChange={(e) => setDraft((d) => ({ ...d, location: e.target.value }))}
+              disabled={saving}
             />
             <Input
               label="Reference URL"
               value={draft.reference_url}
               onChange={(e) => setDraft((d) => ({ ...d, reference_url: e.target.value }))}
               hint="Optional"
+              disabled={saving}
             />
             <Textarea
               label="Notes"
               value={draft.notes}
               onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+              disabled={saving}
             />
           </Grid>
-          {error && <FieldError role="alert">{error}</FieldError>}
-          <Button onClick={handleAdd} style={{ marginTop: '0.75rem' }}>
-            Add Site
-          </Button>
-        </div>
+          <Row style={{ marginTop: '0.75rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+            <AddRow style={{ marginTop: 0 }}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleAdd}
+                disabled={saving}
+                aria-label="Add site"
+                title="Add site"
+              >
+                +
+              </Button>
+            </AddRow>
+          </Row>
+        </EntryCard>
       )}
+
+      {canEditSites && !draftOpen && (
+        <AddRow style={{ marginTop: '1.25rem' }}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={openDraft}
+            disabled={saving}
+            aria-label="Add site"
+            title="Add site"
+          >
+            +
+          </Button>
+        </AddRow>
+      )}
+
+      {error && <FieldError role="alert">{error}</FieldError>}
     </Section>
   );
 }

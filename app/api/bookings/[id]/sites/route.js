@@ -122,15 +122,18 @@ export async function DELETE(request, { params }) {
     const supabase = createServiceClient();
 
     if (removeAll) {
-      const { data: existing, error: listError } = await supabase
-        .from('site_entries')
-        .select('*')
-        .eq('booking_id', id);
+      const type = body.type === 'must_shoot' || body.type === 'avoid' ? body.type : null;
+      let listQuery = supabase.from('site_entries').select('*').eq('booking_id', id);
+      if (type) listQuery = listQuery.eq('type', type);
+
+      const { data: existing, error: listError } = await listQuery;
 
       if (listError) return jsonError(listError.message, 500);
-      if (!existing?.length) return jsonOk({ deleted: true, count: 0 });
+      if (!existing?.length) return jsonOk({ deleted: true, count: 0, type: type || 'all' });
 
-      const { error } = await supabase.from('site_entries').delete().eq('booking_id', id);
+      let deleteQuery = supabase.from('site_entries').delete().eq('booking_id', id);
+      if (type) deleteQuery = deleteQuery.eq('type', type);
+      const { error } = await deleteQuery;
       if (error) return jsonError(error.message, 500);
 
       const { versionNumber } = await bumpVersionAndSnapshot(id, {
@@ -147,11 +150,11 @@ export async function DELETE(request, { params }) {
         actorRole: 'admin',
         action: 'site_entry_removed',
         section: 'sites',
-        previousValue: { count: existing.length, sites: existing },
+        previousValue: { count: existing.length, type: type || 'all', sites: existing },
         source: 'admin_portal',
       });
 
-      return jsonOk({ deleted: true, count: existing.length });
+      return jsonOk({ deleted: true, count: existing.length, type: type || 'all' });
     }
 
     if (!entryId) return jsonError('entryId is required', 400);
