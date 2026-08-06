@@ -10,12 +10,14 @@ import {
   DataRefreshProvider,
   DataRefreshButton,
 } from '@/contexts/DataRefreshContext';
+import { BookingMessagesProvider } from '@/contexts/BookingMessagesContext';
 import { api } from '@/lib/apiClient';
 import { Button } from '@/components/ui/Button';
 import { ChangePasswordDialog } from '@/components/layout/ChangePasswordDialog';
 import { NotificationsBell } from '@/components/layout/NotificationsBell';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { HelpGuideButton } from '@/components/layout/HelpGuideButton';
+import { MessagesButton } from '@/components/messages/MessagesButton';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 
 function formatTokens(n) {
@@ -521,6 +523,7 @@ export function AdminShell({ children, wide = false }) {
 
   return (
     <DataRefreshProvider>
+      <BookingMessagesProvider>
       <Shell>
         <a href="#main-content" className="skip-link">
           Skip to content
@@ -534,6 +537,7 @@ export function AdminShell({ children, wide = false }) {
 
           <HeaderEnd>
             <DataRefreshButton />
+            <MessagesButton variant="admin" />
             <HelpGuideButton variant="admin" />
             <NotificationsBell />
             <ThemeToggle variant="header" />
@@ -675,6 +679,7 @@ export function AdminShell({ children, wide = false }) {
 
         <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
       </Shell>
+      </BookingMessagesProvider>
     </DataRefreshProvider>
   );
 }

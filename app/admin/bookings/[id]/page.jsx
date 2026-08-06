@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import styled from 'styled-components';
 import { AdminShell } from '@/components/layout/AdminShell';
+import { useRegisterBookingMessages } from '@/contexts/BookingMessagesContext';
 import { PageHeader, Row, FieldAddon } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
@@ -476,6 +477,7 @@ export default function BookingDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  useRegisterBookingMessages(id);
 
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);

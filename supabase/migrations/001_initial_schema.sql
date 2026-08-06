@@ -387,6 +387,30 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_type, recipient_id);
 
+-- Booking messages (admin ↔ client portal)
+CREATE TABLE IF NOT EXISTS booking_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  sender_role TEXT NOT NULL CHECK (sender_role IN ('admin', 'client')),
+  sender_id UUID,
+  sender_name TEXT,
+  body TEXT NOT NULL,
+  read_by_admin_at TIMESTAMPTZ,
+  read_by_client_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_booking_messages_booking
+  ON booking_messages(booking_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_booking_messages_admin_unread
+  ON booking_messages(booking_id, created_at DESC)
+  WHERE sender_role = 'client' AND read_by_admin_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_booking_messages_client_unread
+  ON booking_messages(booking_id, created_at DESC)
+  WHERE sender_role = 'admin' AND read_by_client_at IS NULL;
+
 -- Booking reminders (missing-fields + lock notices)
 CREATE TABLE IF NOT EXISTS booking_reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -493,6 +517,7 @@ ALTER TABLE file_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
@@ -608,6 +633,12 @@ CREATE POLICY "Admins insert activity"
 DROP POLICY IF EXISTS "Admins manage notifications" ON notifications;
 CREATE POLICY "Admins manage notifications"
   ON notifications FOR ALL TO authenticated
+  USING (is_admin())
+  WITH CHECK (is_admin());
+
+DROP POLICY IF EXISTS "Admins manage booking messages" ON booking_messages;
+CREATE POLICY "Admins manage booking messages"
+  ON booking_messages FOR ALL TO authenticated
   USING (is_admin())
   WITH CHECK (is_admin());
 

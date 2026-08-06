@@ -238,10 +238,10 @@ const FormatPills = styled.div`
 const FormatPill = styled.button`
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.9rem;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
   border-radius: 999px;
-  font-size: ${({ theme }) => theme.fontSizes.sm};
+  font-size: ${({ theme }) => theme.fontSizes.xs};
   font-weight: ${({ theme }) => theme.fontWeights.medium};
   background: ${({ $soft }) => $soft || '#eceff3'};
   color: ${({ $text }) => $text || 'inherit'};
