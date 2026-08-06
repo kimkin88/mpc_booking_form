@@ -16,7 +16,6 @@ import {
 import { calculateDeliveryDate, effectiveDeliveryDate } from '@/lib/deliveryDate';
 import { calculateInChargeFromBooking } from '@/lib/inCharge';
 import { formatDate, formatCurrencyWhole } from '@/utils/format';
-import { Checkbox } from '@/components/ui/Switch';
 
 const EmailChip = styled.span`
   display: inline-flex;
@@ -331,17 +330,6 @@ export function CampaignDetailsSection({
               {budgetSet && remaining < 0 ? ' — over budget' : ''}
             </span>
           </CalcRow>
-          {isShown(fieldHidden, 'use_remaining_for_extra_shots') && (
-            <CalcRow>
-              <Checkbox
-                id="campaign-extra-shots"
-                checked={!!values.use_remaining_for_extra_shots}
-                disabled={readOnly || fieldDisabled.use_remaining_for_extra_shots}
-                onCheckedChange={(v) => onChange('use_remaining_for_extra_shots', !!v)}
-                label="Use remaining balance for extra shots"
-              />
-            </CalcRow>
-          )}
         </CalcPanel>
       )}
 

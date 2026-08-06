@@ -901,7 +901,6 @@ export default function BookingDetailPage() {
                     booking={form}
                     entries={shootEntries}
                     showDeliveryDate
-                    onBookingChange={onChange}
                     onAdd={async (entry) => {
                       await api.post(`/api/bookings/${id}/schedule`, entry);
                       toast('Shoot day added');

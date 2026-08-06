@@ -75,6 +75,9 @@ export function RateCardPanel({
   const budgetSet = hasBudgetCap(values.budget);
   const spent = shootRowsCost(scheduleEntries, rates);
   const remaining = remainingBudget(values.budget, scheduleEntries, rates);
+  const remainingPositive = budgetSet && Number.isFinite(remaining) && remaining > 0;
+  const showExtraShotsCheckbox =
+    showExtraShots && (remainingPositive || !!values.use_remaining_for_extra_shots);
 
   return (
     <Card>
@@ -101,14 +104,18 @@ export function RateCardPanel({
         </span>
       </Row>
 
-      {showExtraShots && (
+      {showExtraShotsCheckbox && (
         <CheckWrap>
           <Checkbox
             id="use-remaining-extra-shots"
             checked={!!values.use_remaining_for_extra_shots}
-            disabled={readOnly || extraShotsDisabled}
+            disabled={readOnly || extraShotsDisabled || !remainingPositive}
             onCheckedChange={(v) => onChange?.('use_remaining_for_extra_shots', !!v)}
-            label="Use remaining balance for extra shots"
+            label={
+              remainingPositive
+                ? `Use remaining balance (${money(remaining, currency)}) for extra shots`
+                : 'Use remaining balance for extra shots'
+            }
           />
         </CheckWrap>
       )}

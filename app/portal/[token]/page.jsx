@@ -428,6 +428,16 @@ export default function PortalPage() {
               next[key] = result.booking[key];
             }
           }
+          // Extra-shots flag: apply from server unless the client has unsaved edits.
+          if (
+            !dirtyRef.current &&
+            Object.prototype.hasOwnProperty.call(
+              result.booking,
+              'use_remaining_for_extra_shots'
+            )
+          ) {
+            next.use_remaining_for_extra_shots = result.booking.use_remaining_for_extra_shots;
+          }
           return next;
         });
         if (meta.allowToast && (unlocked || meta.filesChanged)) {
@@ -994,12 +1004,6 @@ export default function PortalPage() {
                 readOnly={readOnly || fieldDisabled.schedule}
                 showCalendarHint={false}
                 showDeliveryDate={false}
-                onBookingChange={
-                  fieldHidden.use_remaining_for_extra_shots ||
-                  fieldDisabled.use_remaining_for_extra_shots
-                    ? undefined
-                    : onChange
-                }
                 onAdd={async (entry) => {
                   await portalRequest(`/api/portal/${token}/booking`, {
                     method: 'PATCH',

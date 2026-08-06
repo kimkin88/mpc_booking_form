@@ -21,7 +21,6 @@ import {
 import { shootRequirementsFromSchedule, scheduleAddedByMeta } from '@/lib/calendarFormats';
 import { calculateDeliveryDate } from '@/lib/deliveryDate';
 import { formatDate, formatCurrencyWhole, toDateInputValue } from '@/utils/format';
-import { Checkbox } from '@/components/ui/Switch';
 
 const RowCard = styled.div`
   border: 1px solid
@@ -107,7 +106,6 @@ export function ShootRequirementsSection({
   onAdd,
   onUpdate,
   onRemove,
-  onBookingChange,
   readOnly = false,
   showCalendarHint = true,
   showDeliveryDate = false,
@@ -332,15 +330,6 @@ export function ShootRequirementsSection({
             Remaining: <strong>{money(remaining, currency)}</strong>
             {remaining < 0 ? ' — over budget' : ''}
           </span>
-        )}
-        {onBookingChange && (
-          <Checkbox
-            id={`${id || 'shoot'}-extra-shots`}
-            checked={!!booking?.use_remaining_for_extra_shots}
-            disabled={readOnly}
-            onCheckedChange={(v) => onBookingChange('use_remaining_for_extra_shots', !!v)}
-            label="Use remaining for extra shots"
-          />
         )}
       </BudgetBar>
 
