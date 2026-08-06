@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { ChangePasswordDialog } from '@/components/layout/ChangePasswordDialog';
 import { NotificationsBell } from '@/components/layout/NotificationsBell';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import { HelpGuideButton } from '@/components/layout/HelpGuideButton';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 
 function formatTokens(n) {
@@ -533,6 +534,7 @@ export function AdminShell({ children, wide = false }) {
 
           <HeaderEnd>
             <DataRefreshButton />
+            <HelpGuideButton variant="admin" />
             <NotificationsBell />
             <ThemeToggle variant="header" />
             {!loading && (

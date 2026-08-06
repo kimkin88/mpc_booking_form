@@ -20,6 +20,7 @@ import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { PortalSectionNav } from '@/components/booking/PortalSectionNav';
 import { RateCardPanel } from '@/components/booking/RateCardPanel';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
+import { HelpGuideButton } from '@/components/layout/HelpGuideButton';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { portalRequest } from '@/lib/apiClient';
 import { buildClientFieldState, canClientEdit, getFieldPermission } from '@/lib/permissions';
@@ -894,6 +895,7 @@ export default function PortalPage() {
                 />
               </svg>
             </HeaderIconBtn>
+            <HelpGuideButton variant="portal" />
             <ThemeToggle variant="header" />
           </HeaderActions>
         </HeaderEnd>
