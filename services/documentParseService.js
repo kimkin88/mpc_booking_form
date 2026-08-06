@@ -6,8 +6,9 @@
  *    Calendar: one live bar per PLACEMENT (START→END). FORMAT codes are not collapsed.
  * 2. Multi-market brief sheets (KPI / Environment / Site/Network Name + period cols) — e.g. Nike RTP
  *    Calendar: one live bar per Site/Network Name.
- *    Live window = comment date text (e.g. "19th July - 28th July") if present,
- *    else union of period columns that contain a media cost.
+ *    Live window = union of period columns with a media cost when present;
+ *    otherwise comment date text (supports multi-window comments split on & / and).
+ *    Budget-footer rows (Emily Update / ORF / EC24 / …) are skipped.
  *    Shoot-day rows are never generated from import (calendar-only).
  */
 
@@ -215,6 +216,24 @@ function parseDateRangeText(text, fallbackYear = new Date().getFullYear()) {
     };
   }
 
+  // 2-15 July / 2–15 July
+  m = raw.match(
+    /(\d{1,2})\s*[-–—]\s*(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:\s+(\d{4}))?/i
+  );
+  if (m) {
+    const monthNames = {
+      jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+      jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+    };
+    const year = m[4] ? Number(m[4]) : fallbackYear;
+    const month = monthNames[m[3].slice(0, 3).toLowerCase()];
+    const mm = String(month).padStart(2, '0');
+    return {
+      start: `${year}-${mm}-${String(Number(m[1])).padStart(2, '0')}`,
+      end: `${year}-${mm}-${String(Number(m[2])).padStart(2, '0')}`,
+    };
+  }
+
   // Bare month name column e.g. June / September
   m = raw.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$/i);
   if (m) {
@@ -323,7 +342,22 @@ function resolveShootCity(cityMarket, cityList = []) {
   if (!first) return 'Other';
   if (MARKET_CITIES.includes(first)) return first;
   const hit = MARKET_CITIES.find((c) => c.toLowerCase() === first.toLowerCase());
-  return hit || 'Other';
+  if (hit) return hit;
+  // Rate-card select is UK-only; non-UK shoot days fall back to Other
+  return 'Other';
+}
+
+/** Calendar live-format city: keep sheet cities (Paris, Barcelona, …) as free text. */
+function resolveCalendarCity(cityMarket, cityList = []) {
+  const first = clean(cityList[0] || String(cityMarket || '').split(',')[0] || '');
+  if (!first) return 'Other';
+  if (MARKET_CITIES.includes(first)) return first;
+  const hit = MARKET_CITIES.find((c) => c.toLowerCase() === first.toLowerCase());
+  if (hit) return hit;
+  if (/^(street|subway|train|rail|mall|malls|roadside|office|passenger|airport|other|fees)$/i.test(first)) {
+    return 'Other';
+  }
+  return first;
 }
 
 /** Unique calendar shoot days from a list of YYYY-MM-DD dates. */
@@ -386,7 +420,7 @@ function buildCalendarFormatsFromRows(rows, { city } = {}) {
         live_start: range.start,
         live_end: range.end,
         format,
-        city: resolveShootCity(city, [city]),
+        city: resolveCalendarCity(city, [city]),
         day_length: null,
         notes: `Live ${range.start} → ${range.end}`,
         kind: 'live_format',
@@ -398,23 +432,64 @@ function buildCalendarFormatsFromRows(rows, { city } = {}) {
   return formats.slice(0, 80);
 }
 
-/** Prefer an explicit comment date window; else union of booked period columns. */
-function liveRangeFromBriefRow(row, dateCols, yearHint) {
-  for (const cell of row || []) {
-    if (cell instanceof Date || typeof cell === 'number') continue;
-    const text = clean(cell);
-    if (!looksLikeDateText(text)) continue;
-    // Skip period headers accidentally read from a sub-header row
-    if (isPeriodHeader(text) && !/\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+/i.test(text)) continue;
-    const range = parseDateRangeText(text, yearHint);
-    if (range.start && range.end) {
-      return { live_start: range.start, live_end: range.end, source: 'comment' };
-    }
-    if (range.start) {
-      return { live_start: range.start, live_end: range.start, source: 'comment' };
-    }
-  }
+const BRIEF_BUDGET_FOOTER_RE =
+  /^(ORF|EC24|A4A|Anthem|Reactives|Athlete\s+Extensions|Athlete\s+Stories|Nike\s+Booked)$/i;
 
+function isBriefBudgetFooterLabel(text) {
+  const t = clean(text);
+  if (!t) return false;
+  if (BRIEF_BUDGET_FOOTER_RE.test(t)) return true;
+  if (/^emily\s+update\b/i.test(t)) return true;
+  if (/^fees$/i.test(t)) return true;
+  // "Barcelona Total", "Amsterdam Total", "Total South Africa" — not media sites
+  if (/\btotal\b/i.test(t) && !/\b(circuit|network|package|board|screen)\b/i.test(t)) return true;
+  return false;
+}
+
+function shouldStopBriefSiteRows({ kpi, env, siteName }) {
+  if (/^fees$/i.test(clean(kpi))) return true;
+  if (isBriefBudgetFooterLabel(env) || isBriefBudgetFooterLabel(siteName) || isBriefBudgetFooterLabel(kpi)) {
+    return true;
+  }
+  return false;
+}
+
+/** Split comment cells that list multiple windows (e.g. "2-15 July & 16.07-12.08"). */
+function extractCommentDateRanges(text, yearHint) {
+  let raw = clean(text);
+  if (!raw) return [];
+  raw = raw.replace(/^(actual\s+dates?|dates?)\s*[:\-]?\s*/i, '');
+  const segments = raw
+    .split(/\s*(?:&|\band\b|;)\s*/i)
+    .map((s) => s.replace(/^(?:actual\s+dates?|dates?)\s*[:\-]?\s*/i, '').trim())
+    .filter(Boolean);
+
+  const ranges = [];
+  const seen = new Set();
+  for (const seg of segments.length ? segments : [raw]) {
+    if (!looksLikeDateText(seg) && !/\d{1,2}\.\d{1,2}/.test(seg)) continue;
+    // Skip month period headers like "Jul (01.07-14.07)", not bare "16.07-12.08"
+    if (
+      isPeriodHeader(seg) &&
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(seg) &&
+      !/\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+/i.test(seg) &&
+      !/\d{1,2}\s*[-–—]\s*\d{1,2}\s+[A-Za-z]/i.test(seg)
+    ) {
+      continue;
+    }
+    const range = parseDateRangeText(seg, yearHint);
+    if (!range.start) continue;
+    const live_start = range.start;
+    const live_end = range.end || range.start;
+    const key = `${live_start}|${live_end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ranges.push({ live_start, live_end, source: 'comment' });
+  }
+  return ranges;
+}
+
+function liveRangeFromPeriodCols(row, dateCols) {
   let start = null;
   let end = null;
   for (const dc of dateCols) {
@@ -425,8 +500,44 @@ function liveRangeFromBriefRow(row, dateCols, yearHint) {
     const dcEnd = dc.end || dc.start;
     if (!end || dcEnd > end) end = dcEnd;
   }
-  if (start) return { live_start: start, live_end: end || start, source: 'period' };
-  return null;
+  if (!start) return null;
+  return { live_start: start, live_end: end || start, source: 'period' };
+}
+
+/**
+ * Prefer cost-grid period columns when multiple weeks are booked with money;
+ * else comment date text (supports multiple windows); else a single cost period.
+ * Returns an array of ranges.
+ */
+function liveRangesFromBriefRow(row, dateCols, yearHint) {
+  const bookedCols = dateCols.filter((dc) => {
+    const money = parseMoney(row[dc.idx]);
+    return money != null && money > 0 && dc.start;
+  });
+  const period = liveRangeFromPeriodCols(row, dateCols);
+
+  const fromComments = [];
+  const seen = new Set();
+  for (const cell of row || []) {
+    if (cell instanceof Date || typeof cell === 'number') continue;
+    const text = clean(cell);
+    if (!text) continue;
+    if (!looksLikeDateText(text) && !/\d{1,2}\.\d{1,2}\s*[-–—]/.test(text)) continue;
+    for (const range of extractCommentDateRanges(text, yearHint)) {
+      const key = `${range.live_start}|${range.live_end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fromComments.push(range);
+    }
+  }
+
+  // Multi-week cost grid is the booking source of truth (Nike UK Aug–Sep buys).
+  if (period && bookedCols.length >= 2) {
+    return [{ ...period, source: 'period', supersededComment: fromComments.length > 0 }];
+  }
+  if (fromComments.length) return fromComments;
+  if (period) return [period];
+  return [];
 }
 
 /** Expand inclusive date range into daily dates (capped). */
@@ -795,6 +906,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
     });
 
     let currentKpi = '';
+    let preferredPeriodOverComment = 0;
     for (let r = header.index + 1; r < rows.length; r += 1) {
       const row = rows[r] || [];
       const kpi = cellStr(row, kpiCol) || currentKpi;
@@ -803,14 +915,12 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
       const siteName = siteNameCol != null ? cellStr(row, siteNameCol) : '';
       const formatType = formatTypeCol != null ? cellStr(row, formatTypeCol) : '';
 
-      if (/^fees$/i.test(kpi) || /^emily update/i.test(env) || /total$/i.test(siteName)) {
-        if (/total$/i.test(siteName)) break;
-        if (/^fees$/i.test(kpi)) break;
-      }
+      if (shouldStopBriefSiteRows({ kpi, env, siteName })) break;
       if (!siteName) continue;
       if (/^environment$/i.test(env) && /^site/i.test(siteName)) continue;
       if (/available but not needed/i.test(siteName)) continue;
       if (/replacement pending/i.test(siteName)) continue;
+      if (isBriefBudgetFooterLabel(siteName)) continue;
 
       formatTokens.push(kpi, env, siteName, formatType);
 
@@ -823,11 +933,12 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
         if (dc.end) bookedLiveStarts.push(dc.end);
       }
 
-      const live = liveRangeFromBriefRow(row, dateCols, yearHint);
-      if (live?.live_start) {
+      const lives = liveRangesFromBriefRow(row, dateCols, yearHint);
+      if (lives.some((l) => l.supersededComment)) preferredPeriodOverComment += 1;
+
+      for (const live of lives) {
         commentDates.push(live.live_start);
         if (live.live_end) commentDates.push(live.live_end);
-        // Calendar lane label = site/network name (e.g. "Digital 6 Sheet (100x)")
         const label =
           clean(siteName) ||
           normalizeFormatLabel(formatType, siteName) ||
@@ -841,6 +952,13 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
         });
       }
 
+      const liveNote =
+        lives.length === 0
+          ? null
+          : lives.length === 1
+            ? `Live ${lives[0].live_start} → ${lives[0].live_end || lives[0].live_start}`
+            : `Live ${lives.map((l) => `${l.live_start} → ${l.live_end || l.live_start}`).join(' · ')}`;
+
       sites.push({
         type: 'must_shoot',
         site_name: siteName,
@@ -848,7 +966,7 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
         notes: [
           kpi || null,
           formatType || null,
-          live?.live_start ? `Live ${live.live_start} → ${live.live_end || live.live_start}` : null,
+          liveNote,
           rowCost != null ? `Media cost ~ ${formatMoneyNote(rowCost, SHEET_CURRENCY[sheetName])}` : null,
         ]
           .filter(Boolean)
@@ -856,6 +974,13 @@ function parseBriefSheet(rows, { sheetName, filename } = {}) {
         reference_url: null,
         _cost: rowCost,
       });
+    }
+    if (preferredPeriodOverComment > 0) {
+      warnings.push(
+        `Used media-cost period columns for ${preferredPeriodOverComment} site${
+          preferredPeriodOverComment === 1 ? '' : 's'
+        } where comment dates also existed`
+      );
     }
   }
 
