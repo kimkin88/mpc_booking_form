@@ -596,6 +596,14 @@ export function DeliverablesSection({
               )}
             </CalcRow>
           )}
+          {showInCharge && (
+            <CalcRow>
+              <span className="meta">
+                In-charge is the 14-day production period that covers the earliest preferred shoot
+                date (not the full campaign length).
+              </span>
+            </CalcRow>
+          )}
           {showLock && (
             <CalcRow>
               <span>
@@ -608,7 +616,9 @@ export function DeliverablesSection({
                       : '—'}
                 </strong>
               </span>
-              <span className="meta">Friday before in-charge start (earliest shoot date)</span>
+              <span className="meta">
+                Friday before in-charge start · based on earliest preferred shoot date
+              </span>
             </CalcRow>
           )}
           {inCharge.warning && <Warn>{inCharge.warning}</Warn>}

@@ -323,7 +323,7 @@ export async function updateBooking(bookingId, payload, actor, options = {}) {
 
     const { data: scheduleRows } = await supabase
       .from('schedule_entries')
-      .select('shoot_date')
+      .select('shoot_date, day_length, live_start, live_end, format')
       .eq('booking_id', bookingId);
     const lock = calculateInChargeFromBooking(merged, scheduleRows || []);
     updates.in_charge_reference = lock.reference;
@@ -564,7 +564,7 @@ export async function syncInChargeFromSchedule(bookingId) {
   const supabase = createServiceClient();
   const [{ data: booking }, { data: schedule }] = await Promise.all([
     supabase.from('bookings').select('*').eq('id', bookingId).single(),
-    supabase.from('schedule_entries').select('shoot_date').eq('booking_id', bookingId),
+    supabase.from('schedule_entries').select('shoot_date, day_length, live_start, live_end, format').eq('booking_id', bookingId),
   ]);
   if (!booking) return null;
 
