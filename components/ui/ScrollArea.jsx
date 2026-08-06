@@ -14,12 +14,16 @@ const Viewport = styled(ScrollAreaPrimitive.Viewport)`
   width: 100%;
   height: 100%;
   border-radius: inherit;
+  /* Prevent browser scroll-anchoring from reversing wheel direction when
+     nested content height changes (fonts/styles/images on production). */
+  overflow-anchor: none;
 
   /* Radix wraps children; keep block layout without forcing min-height
      (forced min-height: 100% can prevent nested panels from scrolling). */
   > div {
     display: block !important;
     min-height: 0 !important;
+    overflow-anchor: none;
   }
 `;
 

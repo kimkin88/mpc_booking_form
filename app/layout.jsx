@@ -45,7 +45,6 @@ export default function RootLayout({ children }) {
   return (
     <html
       lang="en-GB"
-      data-scroll-behavior="smooth"
       suppressHydrationWarning
       className={`${poppins.className} ${ibmPlexMono.className}`}
     >

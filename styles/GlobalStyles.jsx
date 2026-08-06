@@ -9,7 +9,12 @@ export const GlobalStyles = createGlobalStyle`
 
   html {
     -webkit-text-size-adjust: 100%;
-    scroll-behavior: smooth;
+    /* Keep document scroll instant. Smooth + scroll-anchoring fights nested
+       ScrollAreas (especially after production font/style hydration) and can
+       make the scrollbar move opposite the wheel. Use behavior:'smooth' only
+       on intentional scrollIntoView calls. */
+    scroll-behavior: auto;
+    overflow-anchor: none;
     color-scheme: ${({ theme }) => theme.mode};
     height: 100%;
   }
@@ -31,6 +36,7 @@ export const GlobalStyles = createGlobalStyle`
     margin: 0;
     min-height: 100%;
     height: 100%;
+    overflow-anchor: none;
     font-family: ${({ theme }) => theme.fonts.body};
     font-size: ${({ theme }) => theme.fontSizes.md};
     line-height: 1.5;

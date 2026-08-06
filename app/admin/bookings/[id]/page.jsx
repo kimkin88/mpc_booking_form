@@ -252,7 +252,6 @@ const SideNav = styled.nav`
   @media (min-width: ${({ theme }) => theme.breakpoints.lg}) {
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => theme.space[3]};
     position: fixed;
     top: var(--panel-top);
     bottom: var(--panel-bottom);
@@ -262,8 +261,14 @@ const SideNav = styled.nav`
       calc(50% - 700px + ${({ theme }) => theme.space[4]})
     );
     z-index: ${({ theme }) => theme.zIndex.sticky - 1};
-    overflow: auto;
+    overflow: hidden;
   }
+`;
+
+const SideNavScroll = styled.div`
+  flex: 1;
+  min-height: 0;
+  height: 100%;
 `;
 
 const NavCard = styled.div`
@@ -1056,8 +1061,14 @@ export default function BookingDetailPage() {
           </PagePad>
 
           <SideNav>
-            {renderRateCard()}
-            {renderSectionsNav()}
+            <SideNavScroll>
+              <ScrollArea type="scroll">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {renderRateCard()}
+                  {renderSectionsNav()}
+                </div>
+              </ScrollArea>
+            </SideNavScroll>
           </SideNav>
         </Tabs>
 
