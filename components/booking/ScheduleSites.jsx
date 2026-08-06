@@ -238,7 +238,7 @@ const FormatPills = styled.div`
   margin-top: ${({ theme }) => theme.space[4]};
 `;
 
-const FormatPill = styled.span`
+const FormatPill = styled.button`
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -248,7 +248,23 @@ const FormatPill = styled.span`
   font-weight: ${({ theme }) => theme.fontWeights.medium};
   background: ${({ $soft }) => $soft || '#eceff3'};
   color: ${({ $text }) => $text || 'inherit'};
-  border: none;
+  border: 2px solid ${({ $active, $text }) => ($active ? $text || 'currentColor' : 'transparent')};
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.3;
+  transition:
+    border-color 120ms ease,
+    filter 120ms ease,
+    box-shadow 120ms ease;
+
+  &:hover {
+    filter: brightness(0.97);
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.focus};
+    outline-offset: 2px;
+  }
 `;
 
 const FormatDot = styled.span`
@@ -472,31 +488,7 @@ export function CalendarSection({
 
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [selected, setSelected] = useState(null);
-  const [didAutoFocus, setDidAutoFocus] = useState(false);
   const [dayModalOpen, setDayModalOpen] = useState(false);
-
-  if (!didAutoFocus) {
-    const firstLive = liveFormats[0];
-    const firstShoot = [...shootDates].sort()[0];
-    const start = String(firstLive?.live_start || firstShoot || '').slice(0, 10);
-    if (start) {
-      let pick = start;
-      if (firstLive) {
-        for (const dayOffset of [0, 1, 2, 3, 4, 5, 6]) {
-          const d = new Date(`${start}T12:00:00`);
-          d.setDate(d.getDate() + dayOffset);
-          const key = toKey(d);
-          if (formatsOnDate(entries, key, liveFormats).length >= 2) {
-            pick = key;
-            break;
-          }
-        }
-      }
-      setDidAutoFocus(true);
-      setCursor(startOfMonth(new Date(`${start}T12:00:00`)));
-      setSelected(pick);
-    }
-  }
 
   const days = useMemo(() => {
     const first = startOfMonth(cursor);
@@ -524,7 +516,8 @@ export function CalendarSection({
       <SectionTitle>Shoot Schedule &amp; Live Dates</SectionTitle>
       <SectionHint>
         Orange day numbers are manually added shoot requirements. Coloured bars are live media
-        formats from the media plan. Click a day to review
+        formats from the media plan. Click a day to review, or a format badge to jump to its live
+        dates
         {readOnly
           ? '.'
           : ', then use the pencil in the day square to add, edit, or remove actions.'}
@@ -636,11 +629,24 @@ export function CalendarSection({
           <FormatPills>
             {liveFormats.map((entry) => {
               const color = colorForLiveEntry(entry, colorByKey);
+              const startKey = String(entry.live_start || '').slice(0, 10);
+              const active = Boolean(selectedKey && entryCoversDate(entry, selectedKey));
+              const label = `${entry.format} ${formatLiveDate(entry.live_start, locale)} – ${formatLiveDate(entry.live_end, locale)}`;
               return (
                 <FormatPill
                   key={entry.id || `${entry.format}-${entry.live_start}-${entry.live_end}`}
+                  type="button"
                   $soft={color.soft}
                   $text={color.text}
+                  $active={active}
+                  aria-pressed={active}
+                  aria-label={`Jump to ${label}`}
+                  title={`Jump to ${formatLiveDate(entry.live_start, locale)}`}
+                  onClick={() => {
+                    if (!startKey) return;
+                    setCursor(startOfMonth(new Date(`${startKey}T12:00:00`)));
+                    setSelected(startKey);
+                  }}
                 >
                   <FormatDot $color={color.bar} />
                   {entry.format} {formatLiveDate(entry.live_start, locale)} –{' '}
