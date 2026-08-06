@@ -5,7 +5,7 @@ import {
 } from '@/lib/api';
 import { isPortalEditable } from '@/services/portalService';
 import { requirePortalFromRequest, getRecentClientUpdates, portalViewerIsAdmin } from '@/lib/portalApi';
-import { updateBooking, getBooking } from '@/services/bookingService';
+import { updateBooking, getBooking, syncInChargeFromSchedule } from '@/services/bookingService';
 import {
   permissionsArrayToMap,
   sanitizeClientUpdate,
@@ -21,7 +21,7 @@ import {
 import { createServiceClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
-import { notifyAdmins, notifyClient } from '@/services/notificationService';
+import { notifyAdmins, notifyClient, notifyBookingOwner } from '@/services/notificationService';
 import { clientActorFromBooking } from '@/utils/helpers';
 import { assertShootFitsBudget, ratesFromBooking } from '@/lib/rateCard';
 
@@ -71,10 +71,36 @@ export async function PATCH(request, { params }) {
         `${actor.name} updated ${booking.sb_number}.`
       );
 
-      if (booking.status === 'waiting_for_client' || booking.status === 'draft') {
+      const previousStatus = booking.status;
+      if (previousStatus === 'waiting_for_client' || previousStatus === 'draft') {
         await updateBooking(booking.id, { status: 'client_updating' }, actor, {
           source: 'client_portal',
         });
+      }
+
+      // Auto ready_for_review when all required fields are complete (one-shot notify).
+      const afterSave = await getBooking(booking.id);
+      const statusNow = afterSave.booking?.status || previousStatus;
+      const terminal = new Set(['ready_for_review', 'approved', 'completed', 'cancelled', 'archived']);
+      if (!terminal.has(statusNow)) {
+        const check = validateForSubmission(
+          afterSave.booking,
+          permissionsMap,
+          afterSave.schedule,
+          afterSave.sites
+        );
+        if (check.valid) {
+          await updateBooking(booking.id, { status: 'ready_for_review' }, actor, {
+            source: 'client_portal',
+          });
+          const readyBooking = (await getBooking(booking.id)).booking || afterSave.booking;
+          await notifyBookingOwner(
+            readyBooking,
+            'client_completed_required',
+            'Booking ready for review',
+            `${actor.name} completed required fields on ${booking.sb_number}.`
+          );
+        }
       }
 
       const recentActivity = (await portalViewerIsAdmin())
@@ -120,12 +146,14 @@ export async function PATCH(request, { params }) {
         ...getRequestMeta(request),
       });
 
-      await notifyAdmins(
-        booking.id,
-        'client_completed_required',
-        'Booking submitted for review',
-        `${clientActor.name} submitted ${booking.sb_number} for review.`
-      );
+      if (booking.status !== 'ready_for_review') {
+        await notifyBookingOwner(
+          result.booking || full.booking || booking,
+          'client_completed_required',
+          'Booking submitted for review',
+          `${clientActor.name} submitted ${booking.sb_number} for review.`
+        );
+      }
 
       if (booking.client_email) {
         await notifyClient(
@@ -202,6 +230,7 @@ export async function PATCH(request, { params }) {
         newValue: data,
         source: 'client_portal',
       });
+      await syncInChargeFromSchedule(booking.id);
       return jsonOk(data);
     }
 
@@ -281,6 +310,7 @@ export async function PATCH(request, { params }) {
         newValue: data,
         source: 'client_portal',
       });
+      await syncInChargeFromSchedule(booking.id);
       return jsonOk(data);
     }
 
@@ -299,6 +329,7 @@ export async function PATCH(request, { params }) {
         name: clientActor.name,
         source: 'client_portal',
       });
+      await syncInChargeFromSchedule(booking.id);
       return jsonOk({ deleted: true });
     }
 

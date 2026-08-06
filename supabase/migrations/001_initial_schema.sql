@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   half_day_rate NUMERIC(14, 2) NOT NULL DEFAULT 640,
   full_day_rate NUMERIC(14, 2) NOT NULL DEFAULT 1040,
   rate_card_label TEXT NOT NULL DEFAULT 'JCD Rates',
+  use_remaining_for_extra_shots BOOLEAN NOT NULL DEFAULT FALSE,
   mpc_owner_name TEXT,
   mpc_backup_owner_name TEXT,
   mpc_chooses_sites BOOLEAN NOT NULL DEFAULT TRUE,

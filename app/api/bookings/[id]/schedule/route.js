@@ -5,6 +5,7 @@ import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
 import { assertShootFitsBudget, costForDayLength, ratesFromBooking } from '@/lib/rateCard';
 import { isLiveFormatEntry, planRemoveCalendarDay } from '@/lib/calendarFormats';
+import { syncInChargeFromSchedule } from '@/services/bookingService';
 
 function normalizeSchedulePayload(data, booking, { actor } = {}) {
   const rates = ratesFromBooking(booking || {});
@@ -126,6 +127,8 @@ export async function POST(request, { params }) {
       source: 'admin_portal',
     });
 
+    await syncInChargeFromSchedule(id);
+
     return jsonCreated(data);
   } catch (err) {
     return jsonError(err.message, 500);
@@ -196,6 +199,8 @@ export async function PATCH(request, { params }) {
       source: 'admin_portal',
     });
 
+    await syncInChargeFromSchedule(id);
+
     return jsonOk(data);
   } catch (err) {
     return jsonError(err.message, 500);
@@ -246,6 +251,8 @@ export async function DELETE(request, { params }) {
         previousValue: { count: existing.length, liveFormats: true },
         source: 'admin_portal',
       });
+
+      await syncInChargeFromSchedule(id);
 
       return jsonOk({ deleted: true, count: existing.length });
     }
@@ -330,6 +337,8 @@ export async function DELETE(request, { params }) {
         source: 'admin_portal',
       });
 
+      await syncInChargeFromSchedule(id);
+
       return jsonOk({ deleted: plan.mode === 'delete', mode: plan.mode, date: dateKey });
     }
 
@@ -358,6 +367,8 @@ export async function DELETE(request, { params }) {
       previousValue: existing,
       source: 'admin_portal',
     });
+
+    await syncInChargeFromSchedule(id);
 
     return jsonOk({ deleted: true });
   } catch (err) {

@@ -22,6 +22,7 @@ import {
 } from '@/components/booking/FormSections';
 import { ShootRequirementsSection } from '@/components/booking/ShootRequirements';
 import { CalendarSection, SitesSection } from '@/components/booking/ScheduleSites';
+import { RateCardPanel } from '@/components/booking/RateCardPanel';
 import { FilesSection } from '@/components/files/FilesSection';
 import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalControls, PermissionsPanel } from '@/components/booking/PortalPermissions';
@@ -221,7 +222,7 @@ const Workspace = styled.div`
   align-items: start;
 
   @media (min-width: ${({ theme }) => theme.breakpoints.lg}) {
-    grid-template-columns: 240px minmax(0, 1fr) 260px;
+    grid-template-columns: 260px minmax(0, 1fr) 260px;
   }
 `;
 
@@ -230,7 +231,7 @@ const SideNavSpacer = styled.div`
 
   @media (min-width: ${({ theme }) => theme.breakpoints.lg}) {
     display: block;
-    width: 240px;
+    width: 260px;
     flex-shrink: 0;
     pointer-events: none;
   }
@@ -249,11 +250,13 @@ const SideNav = styled.nav`
   display: none;
 
   @media (min-width: ${({ theme }) => theme.breakpoints.lg}) {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: ${({ theme }) => theme.space[3]};
     position: fixed;
     top: var(--panel-top);
     bottom: var(--panel-bottom);
-    width: 240px;
+    width: 260px;
     left: max(
       ${({ theme }) => theme.space[4]},
       calc(50% - 700px + ${({ theme }) => theme.space[4]})
@@ -768,6 +771,18 @@ export default function BookingDetailPage() {
           : 'No client updates yet. Changes from the portal will appear here.',
   };
 
+  const shootEntries = shootRequirementsFromSchedule(data?.schedule);
+
+  const renderRateCard = () => (
+    <RateCardPanel
+      values={form}
+      scheduleEntries={shootEntries}
+      onChange={onChange}
+      editableRates
+      showExtraShots
+    />
+  );
+
   const renderSectionsNav = () => (
     <NavCard>
       <NavTitle>Sections</NavTitle>
@@ -853,16 +868,19 @@ export default function BookingDetailPage() {
                   </RemoteBanner>
                 )}
 
-                <MobileSections>{renderSectionsNav()}</MobileSections>
+                <MobileSections>
+                  {renderRateCard()}
+                  <div style={{ height: '0.75rem' }} />
+                  {renderSectionsNav()}
+                </MobileSections>
                 <TabsContent value="details">
                   <CampaignDetailsSection
                     id="admin-campaign"
                     values={form}
                     onChange={onChange}
                     errors={errors}
-                    showRateCard
                     showAdminOwnership
-                    scheduleEntries={shootRequirementsFromSchedule(data.schedule)}
+                    scheduleEntries={shootEntries}
                     poFiles={
                       <PoDocumentUploader
                         bookingId={id}
@@ -881,7 +899,9 @@ export default function BookingDetailPage() {
                   <ShootRequirementsSection
                     id="admin-schedule"
                     booking={form}
-                    entries={shootRequirementsFromSchedule(data.schedule)}
+                    entries={shootEntries}
+                    showDeliveryDate
+                    onBookingChange={onChange}
                     onAdd={async (entry) => {
                       await api.post(`/api/bookings/${id}/schedule`, entry);
                       toast('Shoot day added');
@@ -932,6 +952,7 @@ export default function BookingDetailPage() {
                     onChange={onChange}
                     errors={errors}
                     showAdminOverride
+                    scheduleEntries={shootEntries}
                     filesSlot={
                       <FilesSection
                         bookingId={id}
@@ -1035,7 +1056,10 @@ export default function BookingDetailPage() {
             </Workspace>
           </PagePad>
 
-          <SideNav>{renderSectionsNav()}</SideNav>
+          <SideNav>
+            {renderRateCard()}
+            {renderSectionsNav()}
+          </SideNav>
         </Tabs>
 
         <UpdatesAside aria-label="Recent client updates">

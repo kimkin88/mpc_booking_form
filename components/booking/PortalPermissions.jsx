@@ -230,9 +230,9 @@ function AutomationPanel({ bookingId, lockDate: lockDateProp, onRefresh }) {
         Auto-lock & reminders
       </SectionTitle>
       <SectionHint>
-        Portal locks automatically on the lock date (7 days before in-charge start). Missing-field
-        reminders go out 3 days and 1 day before lock. Emails send via Resend when configured;
-        otherwise they are logged in-app.
+        Portal locks automatically on the Friday before in-charge start (from the earliest preferred
+        shoot date). Missing-field reminders go out 7 days, 3 days, and 1 day before lock; otherwise
+        they are logged in-app.
       </SectionHint>
 
       {loading ? (

@@ -94,7 +94,6 @@ export default function NewBookingPage() {
     e.preventDefault();
     const nextErrors = {};
     if (!form.sb_number.trim()) nextErrors.sb_number = 'SB Number is required';
-    if (!form.currency) nextErrors.currency = 'Currency is required';
     if (form.budget && Number.isNaN(Number(form.budget))) {
       nextErrors.budget = 'Budget must be numeric';
     }
@@ -156,7 +155,6 @@ export default function NewBookingPage() {
             </div>
             <Select
               label="Currency"
-              required
               value={form.currency}
               onValueChange={(v) => set('currency', v)}
               options={CURRENCIES}

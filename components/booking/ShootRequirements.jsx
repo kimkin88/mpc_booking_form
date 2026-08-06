@@ -19,7 +19,9 @@ import {
   shootRowsCost,
 } from '@/lib/rateCard';
 import { shootRequirementsFromSchedule, scheduleAddedByMeta } from '@/lib/calendarFormats';
+import { calculateDeliveryDate } from '@/lib/deliveryDate';
 import { formatDate, formatCurrencyWhole, toDateInputValue } from '@/utils/format';
+import { Checkbox } from '@/components/ui/Switch';
 
 const RowCard = styled.div`
   border: 1px solid
@@ -105,13 +107,16 @@ export function ShootRequirementsSection({
   onAdd,
   onUpdate,
   onRemove,
+  onBookingChange,
   readOnly = false,
   showCalendarHint = true,
+  showDeliveryDate = false,
   id,
 }) {
   const rates = useMemo(() => ratesFromBooking(booking), [booking]);
   const budget = booking?.budget;
   const currency = booking?.currency || 'GBP';
+  const formatType = booking?.format_type || '';
   // Never show calendar live-format rows here — those belong on the Calendar tab only
   const entries = useMemo(
     () => shootRequirementsFromSchedule(entriesProp),
@@ -328,6 +333,15 @@ export function ShootRequirementsSection({
             {remaining < 0 ? ' — over budget' : ''}
           </span>
         )}
+        {onBookingChange && (
+          <Checkbox
+            id={`${id || 'shoot'}-extra-shots`}
+            checked={!!booking?.use_remaining_for_extra_shots}
+            disabled={readOnly}
+            onCheckedChange={(v) => onBookingChange('use_remaining_for_extra_shots', !!v)}
+            label="Use remaining for extra shots"
+          />
+        )}
       </BudgetBar>
 
       {entries.map((entry) => {
@@ -385,13 +399,31 @@ export function ShootRequirementsSection({
                 options={cityOptions}
                 disabled={readOnly || saving}
               />
-              <Input
-                label="Preferred Shoot Date"
-                type="date"
-                value={toDateInputValue(entry.shoot_date)}
-                onChange={(e) => handleFieldUpdate(entry, { shoot_date: e.target.value })}
-                disabled={readOnly || saving}
-              />
+              <div>
+                <Input
+                  label="Preferred Shoot Date"
+                  type="date"
+                  value={toDateInputValue(entry.shoot_date)}
+                  onChange={(e) => handleFieldUpdate(entry, { shoot_date: e.target.value })}
+                  disabled={readOnly || saving}
+                />
+                {showDeliveryDate && (
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', opacity: 0.85 }}>
+                    Delivery date:{' '}
+                    <strong>
+                      {(() => {
+                        const d = calculateDeliveryDate(
+                          formatType,
+                          entry.shoot_date || booking?.campaign_start
+                        );
+                        if (d.status === 'calculated') return formatDate(d.date);
+                        if (d.status === 'tbc') return 'TBC';
+                        return '—';
+                      })()}
+                    </strong>
+                  </div>
+                )}
+              </div>
             </Grid>
             <Row style={{ marginTop: '0.75rem', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.875rem', opacity: 0.85 }}>
@@ -422,14 +454,32 @@ export function ShootRequirementsSection({
               options={cityOptions}
               disabled={saving}
             />
-            <Input
-              label="Preferred Shoot Date"
-              type="date"
-              required
-              value={draft.shoot_date}
-              onChange={(e) => setDraft((d) => ({ ...d, shoot_date: e.target.value }))}
-              disabled={saving}
-            />
+            <div>
+              <Input
+                label="Preferred Shoot Date"
+                type="date"
+                required
+                value={draft.shoot_date}
+                onChange={(e) => setDraft((d) => ({ ...d, shoot_date: e.target.value }))}
+                disabled={saving}
+              />
+              {showDeliveryDate && (
+                <div style={{ marginTop: '0.35rem', fontSize: '0.8rem', opacity: 0.85 }}>
+                  Delivery date:{' '}
+                  <strong>
+                    {(() => {
+                      const d = calculateDeliveryDate(
+                        formatType,
+                        draft.shoot_date || booking?.campaign_start
+                      );
+                      if (d.status === 'calculated') return formatDate(d.date);
+                      if (d.status === 'tbc') return 'TBC';
+                      return '—';
+                    })()}
+                  </strong>
+                </div>
+              )}
+            </div>
           </Grid>
           <Row style={{ marginTop: '0.75rem', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.875rem', opacity: 0.85 }}>

@@ -14,8 +14,9 @@ import {
   shootRowsCost,
 } from '@/lib/rateCard';
 import { calculateDeliveryDate, effectiveDeliveryDate } from '@/lib/deliveryDate';
-import { calculateInCharge, calculatePortalLockDate } from '@/lib/inCharge';
+import { calculateInChargeFromBooking } from '@/lib/inCharge';
 import { formatDate, formatCurrencyWhole } from '@/utils/format';
+import { Checkbox } from '@/components/ui/Switch';
 
 const EmailChip = styled.span`
   display: inline-flex;
@@ -207,11 +208,10 @@ export function CampaignDetailsSection({
   fieldRequired = {},
   scheduleEntries = [],
   poFiles = null,
-  showRateCard = false,
   showAdminOwnership = false,
   id,
 }) {
-  const keys = ['brand', 'campaign_name', 'city_market', 'sb_number', 'budget', 'currency', 'po_number'];
+  const keys = ['brand', 'campaign_name', 'sb_number', 'budget', 'currency', 'po_number'];
   if (!anyShown(fieldHidden, keys) && !poFiles && !showAdminOwnership) return null;
 
   const rates = ratesFromBooking(values);
@@ -244,18 +244,6 @@ export function CampaignDetailsSection({
             onChange={(e) => onChange('campaign_name', e.target.value)}
             disabled={readOnly || fieldDisabled.campaign_name}
             error={errors.campaign_name}
-          />
-        )}
-        {isShown(fieldHidden, 'city_market') && (
-          <Input
-            label="City / Market"
-            name="city_market"
-            required={!!fieldRequired.city_market}
-            value={values.city_market || ''}
-            onChange={(e) => onChange('city_market', e.target.value)}
-            disabled={readOnly || fieldDisabled.city_market}
-            error={errors.city_market}
-            placeholder="London"
           />
         )}
         {isShown(fieldHidden, 'sb_number') && (
@@ -335,15 +323,6 @@ export function CampaignDetailsSection({
         <CalcPanel>
           <CalcRow>
             <span>
-              Rate card: <strong>{rates.label}</strong>
-            </span>
-            <span className="meta">
-              1 day {money(rates.fullDay, values.currency)} · 0.5 day{' '}
-              {money(rates.halfDay, values.currency)}
-            </span>
-          </CalcRow>
-          <CalcRow>
-            <span>
               Shoot cost allocated: <strong>{money(spent, values.currency)}</strong>
             </span>
             <span>
@@ -352,40 +331,18 @@ export function CampaignDetailsSection({
               {budgetSet && remaining < 0 ? ' — over budget' : ''}
             </span>
           </CalcRow>
+          {isShown(fieldHidden, 'use_remaining_for_extra_shots') && (
+            <CalcRow>
+              <Checkbox
+                id="campaign-extra-shots"
+                checked={!!values.use_remaining_for_extra_shots}
+                disabled={readOnly || fieldDisabled.use_remaining_for_extra_shots}
+                onCheckedChange={(v) => onChange('use_remaining_for_extra_shots', !!v)}
+                label="Use remaining balance for extra shots"
+              />
+            </CalcRow>
+          )}
         </CalcPanel>
-      )}
-
-      {showRateCard && (
-        <Grid $cols={3} style={{ marginTop: '1rem' }}>
-          <Input
-            label="Rate card label"
-            name="rate_card_label"
-            value={values.rate_card_label || 'JCD Rates'}
-            onChange={(e) => onChange('rate_card_label', e.target.value)}
-            disabled={readOnly}
-            hint="Configurable per client"
-          />
-          <Input
-            label="0.5 day rate"
-            name="half_day_rate"
-            type="number"
-            step="0.01"
-            min="0"
-            value={values.half_day_rate ?? 640}
-            onChange={(e) => onChange('half_day_rate', e.target.value === '' ? null : e.target.value)}
-            disabled={readOnly}
-          />
-          <Input
-            label="1 day rate"
-            name="full_day_rate"
-            type="number"
-            step="0.01"
-            min="0"
-            value={values.full_day_rate ?? 1040}
-            onChange={(e) => onChange('full_day_rate', e.target.value === '' ? null : e.target.value)}
-            disabled={readOnly}
-          />
-        </Grid>
       )}
 
       {showAdminOwnership && (
@@ -515,6 +472,7 @@ export function DeliverablesSection({
   fieldRequired = {},
   filesSlot = null,
   showAdminOverride = false,
+  scheduleEntries = [],
   id,
 }) {
   const keys = ['format_type', 'campaign_start', 'campaign_end', 'client_notes', 'files'];
@@ -527,20 +485,22 @@ export function DeliverablesSection({
     [formatType, values.campaign_start]
   );
   const effective = useMemo(() => effectiveDeliveryDate(values), [values]);
-  const inCharge = useMemo(
-    () => calculateInCharge(values.campaign_start),
-    [values.campaign_start]
-  );
   const lockInfo = useMemo(
-    () => calculatePortalLockDate(values.campaign_start),
-    [values.campaign_start]
+    () => calculateInChargeFromBooking(values, scheduleEntries),
+    [values, scheduleEntries]
   );
+  const inCharge = lockInfo;
 
   if (!anyShown(fieldHidden, keys) && !filesSlot) return null;
 
   const formatRequired = fieldRequired.format_type !== false;
   const startRequired = fieldRequired.campaign_start !== false;
   const endRequired = fieldRequired.campaign_end !== false;
+  const showDelivery =
+    showAdminOverride || isShown(fieldHidden, 'calculated_delivery_date');
+  const showInCharge = isShown(fieldHidden, 'in_charge_reference');
+  const showLock = isShown(fieldHidden, 'portal_lock_date');
+  const showCalcPanel = showDelivery || showInCharge || showLock;
 
   return (
     <Section id={id}>
@@ -614,50 +574,60 @@ export function DeliverablesSection({
         </Grid>
       )}
 
-      <CalcPanel>
-        <CalcRow>
-          <span>
-            Delivery due date:{' '}
-            <strong>
-              {effective.status === 'override'
-                ? formatDate(effective.date)
-                : delivery.status === 'calculated'
-                  ? formatDate(delivery.date)
-                  : delivery.status === 'tbc'
-                    ? 'TBC'
-                    : '—'}
-            </strong>
-          </span>
-          <span className="meta">{effective.status === 'override' ? effective.label : delivery.label}</span>
-        </CalcRow>
-        <CalcRow>
-          <span>
-            In-Charge Reference:{' '}
-            <strong>{inCharge.reference || values.in_charge_reference || '—'}</strong>
-          </span>
-          {inCharge.periodStart && (
-            <span className="meta">
-              {formatDate(inCharge.periodStart)} → {formatDate(inCharge.periodEnd)}
-            </span>
+      {showCalcPanel && (
+        <CalcPanel>
+          {showDelivery && (
+            <CalcRow>
+              <span>
+                Delivery due date:{' '}
+                <strong>
+                  {effective.status === 'override'
+                    ? formatDate(effective.date)
+                    : delivery.status === 'calculated'
+                      ? formatDate(delivery.date)
+                      : delivery.status === 'tbc'
+                        ? 'TBC'
+                        : '—'}
+                </strong>
+              </span>
+              <span className="meta">
+                {effective.status === 'override' ? effective.label : delivery.label}
+              </span>
+            </CalcRow>
           )}
-        </CalcRow>
-        <CalcRow>
-          <span>
-            Portal lock date:{' '}
-            <strong>
-              {lockInfo.lockDate
-                ? formatDate(lockInfo.lockDate)
-                : values.portal_lock_date
-                  ? formatDate(values.portal_lock_date)
-                  : '—'}
-            </strong>
-          </span>
-          <span className="meta">7 days before in-charge period start</span>
-        </CalcRow>
-        {inCharge.warning && <Warn>{inCharge.warning}</Warn>}
-      </CalcPanel>
+          {showInCharge && (
+            <CalcRow>
+              <span>
+                In-Charge Reference:{' '}
+                <strong>{inCharge.reference || values.in_charge_reference || '—'}</strong>
+              </span>
+              {inCharge.periodStart && (
+                <span className="meta">
+                  {formatDate(inCharge.periodStart)} → {formatDate(inCharge.periodEnd)}
+                </span>
+              )}
+            </CalcRow>
+          )}
+          {showLock && (
+            <CalcRow>
+              <span>
+                Portal lock date:{' '}
+                <strong>
+                  {lockInfo.lockDate
+                    ? formatDate(lockInfo.lockDate)
+                    : values.portal_lock_date
+                      ? formatDate(values.portal_lock_date)
+                      : '—'}
+                </strong>
+              </span>
+              <span className="meta">Friday before in-charge start (earliest shoot date)</span>
+            </CalcRow>
+          )}
+          {inCharge.warning && <Warn>{inCharge.warning}</Warn>}
+        </CalcPanel>
+      )}
 
-      {showAdminOverride && (
+      {showAdminOverride && showDelivery && (
         <Grid $cols={2} style={{ marginTop: '1rem' }}>
           <Input
             label="Delivery date override"

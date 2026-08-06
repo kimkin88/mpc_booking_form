@@ -5,7 +5,8 @@ import { bumpVersionAndSnapshot, createBookingSnapshot } from '@/services/versio
 import { notifyClient } from '@/services/notificationService';
 import { diffObjects } from '@/utils/helpers';
 import { calculateDeliveryDate } from '@/lib/deliveryDate';
-import { calculatePortalLockDate } from '@/lib/inCharge';
+import { calculateInChargeFromBooking } from '@/lib/inCharge';
+import { costForDayLength, ratesFromBooking } from '@/lib/rateCard';
 
 function statusLabel(value) {
   return BOOKING_STATUSES.find((s) => s.value === value)?.label || value;
@@ -42,6 +43,7 @@ const TRACKED_FIELDS = [
   'mpc_owner_name',
   'mpc_backup_owner_name',
   'mpc_chooses_sites',
+  'use_remaining_for_extra_shots',
   'po_required',
   'po_received',
   'po_number',
@@ -319,7 +321,11 @@ export async function updateBooking(bookingId, payload, actor, options = {}) {
     const delivery = calculateDeliveryDate(merged.format_type, merged.campaign_start);
     updates.calculated_delivery_date = delivery.status === 'calculated' ? delivery.date : null;
 
-    const lock = calculatePortalLockDate(merged.campaign_start);
+    const { data: scheduleRows } = await supabase
+      .from('schedule_entries')
+      .select('shoot_date')
+      .eq('booking_id', bookingId);
+    const lock = calculateInChargeFromBooking(merged, scheduleRows || []);
     updates.in_charge_reference = lock.reference;
     updates.in_charge_period_start = lock.periodStart;
     updates.in_charge_period_end = lock.periodEnd;
@@ -344,6 +350,40 @@ export async function updateBooking(bookingId, payload, actor, options = {}) {
       throw err;
     }
     throw error;
+  }
+
+  // When the rate card changes, re-apply costs onto shoot rows so portal/admin
+  // remaining budget and row totals match the new rates immediately.
+  const ratesChanged =
+    Object.prototype.hasOwnProperty.call(updates, 'half_day_rate') ||
+    Object.prototype.hasOwnProperty.call(updates, 'full_day_rate') ||
+    Object.prototype.hasOwnProperty.call(updates, 'rate_card_label');
+  if (ratesChanged) {
+    const rates = ratesFromBooking(booking);
+    const { data: shootRows } = await supabase
+      .from('schedule_entries')
+      .select('id, day_length, live_start, live_end, applied_currency')
+      .eq('booking_id', bookingId);
+
+    const toUpdate = (shootRows || []).filter((row) => {
+      if (row?.live_start && row?.live_end && (row.day_length == null || row.day_length === '')) {
+        return false;
+      }
+      return row.day_length != null && row.day_length !== '';
+    });
+
+    await Promise.all(
+      toUpdate.map((row) =>
+        supabase
+          .from('schedule_entries')
+          .update({
+            applied_rate: costForDayLength(row.day_length, rates),
+            applied_currency: row.applied_currency || booking.currency || 'GBP',
+          })
+          .eq('id', row.id)
+          .eq('booking_id', bookingId)
+      )
+    );
   }
 
   const changes = diffObjects(current, booking, TRACKED_FIELDS);
@@ -515,3 +555,34 @@ export async function deleteBooking(bookingId, _actor) {
 
   return { deleted: true, id: bookingId, sb_number: booking.sb_number };
 }
+
+/**
+ * Recalculate in-charge + portal lock from earliest preferred shoot date
+ * (falls back to campaign_start). Call after schedule shoot dates change.
+ */
+export async function syncInChargeFromSchedule(bookingId) {
+  const supabase = createServiceClient();
+  const [{ data: booking }, { data: schedule }] = await Promise.all([
+    supabase.from('bookings').select('*').eq('id', bookingId).single(),
+    supabase.from('schedule_entries').select('shoot_date').eq('booking_id', bookingId),
+  ]);
+  if (!booking) return null;
+
+  const lock = calculateInChargeFromBooking(booking, schedule || []);
+  const updates = {
+    in_charge_reference: lock.reference,
+    in_charge_period_start: lock.periodStart,
+    in_charge_period_end: lock.periodEnd,
+    portal_lock_date: lock.lockDate,
+  };
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .update(updates)
+    .eq('id', bookingId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+

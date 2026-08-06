@@ -18,6 +18,7 @@ import { FilesSection } from '@/components/files/FilesSection';
 import { PoDocumentUploader } from '@/components/files/PoDocumentUploader';
 import { PortalRecentUpdates } from '@/components/activity/PortalRecentUpdates';
 import { PortalSectionNav } from '@/components/booking/PortalSectionNav';
+import { RateCardPanel } from '@/components/booking/RateCardPanel';
 import { ThemeToggle } from '@/components/layout/ThemeToggle';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { portalRequest } from '@/lib/apiClient';
@@ -411,6 +412,7 @@ export default function PortalPage() {
             : result
         );
         // Keep local edits; sync version + any fields the client cannot edit
+        // (includes readonly rate card fields so admin rate saves apply live).
         setForm((prev) => {
           if (!prev || !result?.booking) return prev;
           const perms = result.permissions || permissionsRef.current || {};
@@ -420,6 +422,12 @@ export default function PortalPage() {
             if (canClientEdit(getFieldPermission(perms, key))) return;
             next[key] = result.booking[key];
           });
+          // Always apply rate card from server (readonly; never client-edited).
+          for (const key of ['half_day_rate', 'full_day_rate', 'rate_card_label']) {
+            if (Object.prototype.hasOwnProperty.call(result.booking, key)) {
+              next[key] = result.booking[key];
+            }
+          }
           return next;
         });
         if (meta.allowToast && (unlocked || meta.filesChanged)) {
@@ -885,6 +893,16 @@ export default function PortalPage() {
         <AsideScroll>
           <ScrollArea type="scroll">
             <AsidePad>
+              <RateCardPanel
+                values={form}
+                scheduleEntries={shootRequirementsFromSchedule(data.schedule)}
+                onChange={onChange}
+                readOnly={readOnly}
+                editableRates={false}
+                showExtraShots={!fieldHidden.use_remaining_for_extra_shots}
+                extraShotsDisabled={readOnly || fieldDisabled.use_remaining_for_extra_shots}
+              />
+              <div style={{ height: '0.75rem' }} />
               <PortalSectionNav sections={navSections} />
             </AsidePad>
           </ScrollArea>
@@ -975,6 +993,13 @@ export default function PortalPage() {
                 entries={shootRequirementsFromSchedule(data.schedule)}
                 readOnly={readOnly || fieldDisabled.schedule}
                 showCalendarHint={false}
+                showDeliveryDate={false}
+                onBookingChange={
+                  fieldHidden.use_remaining_for_extra_shots ||
+                  fieldDisabled.use_remaining_for_extra_shots
+                    ? undefined
+                    : onChange
+                }
                 onAdd={async (entry) => {
                   await portalRequest(`/api/portal/${token}/booking`, {
                     method: 'PATCH',
@@ -1018,6 +1043,7 @@ export default function PortalPage() {
               fieldDisabled={fieldDisabled}
               fieldHidden={fieldHidden}
               fieldRequired={fieldRequired}
+              scheduleEntries={shootRequirementsFromSchedule(data.schedule)}
               filesSlot={
                 !fieldHidden.files ? (
                   <FilesSection
