@@ -644,7 +644,7 @@ Vercel cron daily (`0 8 * * *`) hits `/api/cron/portal-automation` (reminders + 
 
 ## 12. Security
 
-- Admin routes guarded by middleware + `requireAdmin`
+- Admin routes guarded by proxy + `requireAdmin`
 - Portal tokens hashed at rest; optional PIN with lockout
 - Portal session cookie after PIN unlock
 - Field-level portal permissions + server-side write filters

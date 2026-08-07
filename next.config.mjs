@@ -11,7 +11,7 @@ const nextConfig = {
       },
     ],
   },
-  // Middleware buffers request bodies (default 10MB). Kept high for any
+  // Proxy buffers request bodies (default 10MB). Kept high for any
   // non-upload JSON payloads; file bytes go direct to Supabase Storage
   // (required on Vercel — serverless functions cap bodies at 4.5MB).
   experimental: {
