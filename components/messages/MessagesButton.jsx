@@ -224,7 +224,8 @@ const Composer = styled.form`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.space[2]};
-  padding-top: ${({ theme }) => theme.space[2]};
+  /* Inset so focus ring isn’t clipped by overflow:hidden ancestors */
+  padding: ${({ theme }) => theme.space[2]} 3px 1px;
   border-top: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
@@ -244,9 +245,9 @@ const TextArea = styled.textarea`
   line-height: 1.4;
 
   &:focus {
-    outline: 2px solid ${({ theme }) => theme.colors.focus};
-    outline-offset: 1px;
+    outline: none;
     border-color: ${({ theme }) => theme.colors.primary};
+    box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.focus};
   }
 `;
 
@@ -328,14 +329,11 @@ export function MessagesButton({ variant = 'admin', token = null }) {
     }
   }, [isPortal, token]);
 
-  const onRefresh = useEffectEvent(() => {
-    loadUnread();
-  });
-
-  useDataRefresh(() => onRefresh());
+  useDataRefresh(loadUnread);
 
   useEffect(() => {
-    loadUnread();
+    const timer = window.setTimeout(loadUnread, 0);
+    return () => window.clearTimeout(timer);
   }, [loadUnread]);
 
   useVisibilityInterval(loadUnread, { enabled: !open, intervalMs: 45000 });
@@ -503,11 +501,6 @@ export function MessagesButton({ variant = 'admin', token = null }) {
         }
         size="lg"
         scrollable
-        footer={
-          <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-            Close
-          </Button>
-        }
       >
         <Shell>
           <Layout $inbox={showInbox}>
