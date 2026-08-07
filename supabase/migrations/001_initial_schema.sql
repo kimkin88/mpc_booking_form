@@ -442,13 +442,16 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
 -- TRIGGERS / FUNCTIONS
 -- =====================
 
-CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS bookings_updated_at ON bookings;
 CREATE TRIGGER bookings_updated_at
@@ -475,9 +478,13 @@ CREATE TRIGGER profiles_updated_at
   BEFORE UPDATE ON profiles
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Auto-create profile on signup
-CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
+-- Auto-create profile on signup (trigger-only; not an API RPC)
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
 BEGIN
   INSERT INTO public.profiles (id, email, full_name, role)
   VALUES (
@@ -488,12 +495,15 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM anon, authenticated;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Storage bucket
 INSERT INTO storage.buckets (id, name, public, file_size_limit)
@@ -521,19 +531,34 @@ ALTER TABLE booking_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
-CREATE OR REPLACE FUNCTION is_admin()
-RETURNS BOOLEAN AS $$
+-- Keep helper out of the PostgREST API schema to avoid /rest/v1/rpc exposure.
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC;
+GRANT USAGE ON SCHEMA private TO postgres, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION private.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
   SELECT EXISTS (
-    SELECT 1 FROM profiles
+    SELECT 1
+    FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$;
+
+REVOKE ALL ON FUNCTION private.is_admin() FROM PUBLIC;
+REVOKE ALL ON FUNCTION private.is_admin() FROM anon;
+GRANT EXECUTE ON FUNCTION private.is_admin() TO authenticated, service_role;
 
 -- Profiles
 DROP POLICY IF EXISTS "Admins can read all profiles" ON profiles;
 CREATE POLICY "Admins can read all profiles"
   ON profiles FOR SELECT TO authenticated
-  USING (is_admin());
+  USING (private.is_admin());
 
 DROP POLICY IF EXISTS "Users can read own profile" ON profiles;
 CREATE POLICY "Users can read own profile"
@@ -549,131 +574,131 @@ CREATE POLICY "Users can update own profile"
 DROP POLICY IF EXISTS "Admins manage bookings" ON bookings;
 CREATE POLICY "Admins manage bookings"
   ON bookings FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Legacy booking field permissions
 DROP POLICY IF EXISTS "Admins manage field permissions" ON booking_field_permissions;
 CREATE POLICY "Admins manage field permissions"
   ON booking_field_permissions FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Portal field permissions
 DROP POLICY IF EXISTS "Admins manage portal field permissions" ON portal_field_permissions;
 CREATE POLICY "Admins manage portal field permissions"
   ON portal_field_permissions FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Portal access
 DROP POLICY IF EXISTS "Admins manage portal access" ON portal_access;
 CREATE POLICY "Admins manage portal access"
   ON portal_access FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Portal sessions
 DROP POLICY IF EXISTS "Admins read portal sessions" ON portal_sessions;
 CREATE POLICY "Admins read portal sessions"
   ON portal_sessions FOR SELECT TO authenticated
-  USING (is_admin());
+  USING (private.is_admin());
 
 -- Schedule
 DROP POLICY IF EXISTS "Admins manage schedule" ON schedule_entries;
 CREATE POLICY "Admins manage schedule"
   ON schedule_entries FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Sites
 DROP POLICY IF EXISTS "Admins manage sites" ON site_entries;
 CREATE POLICY "Admins manage sites"
   ON site_entries FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- File category statuses
 DROP POLICY IF EXISTS "Admins manage category statuses" ON file_category_statuses;
 CREATE POLICY "Admins manage category statuses"
   ON file_category_statuses FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Files
 DROP POLICY IF EXISTS "Admins manage files" ON file_assets;
 CREATE POLICY "Admins manage files"
   ON file_assets FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 -- Versions
 DROP POLICY IF EXISTS "Admins read versions" ON booking_versions;
 CREATE POLICY "Admins read versions"
   ON booking_versions FOR SELECT TO authenticated
-  USING (is_admin());
+  USING (private.is_admin());
 
 DROP POLICY IF EXISTS "Admins insert versions" ON booking_versions;
 CREATE POLICY "Admins insert versions"
   ON booking_versions FOR INSERT TO authenticated
-  WITH CHECK (is_admin());
+  WITH CHECK (private.is_admin());
 
 -- Activity
 DROP POLICY IF EXISTS "Admins read activity" ON activity_entries;
 CREATE POLICY "Admins read activity"
   ON activity_entries FOR SELECT TO authenticated
-  USING (is_admin());
+  USING (private.is_admin());
 
 DROP POLICY IF EXISTS "Admins insert activity" ON activity_entries;
 CREATE POLICY "Admins insert activity"
   ON activity_entries FOR INSERT TO authenticated
-  WITH CHECK (is_admin());
+  WITH CHECK (private.is_admin());
 
 -- Notifications
 DROP POLICY IF EXISTS "Admins manage notifications" ON notifications;
 CREATE POLICY "Admins manage notifications"
   ON notifications FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 DROP POLICY IF EXISTS "Admins manage booking messages" ON booking_messages;
 CREATE POLICY "Admins manage booking messages"
   ON booking_messages FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 DROP POLICY IF EXISTS "Admins manage booking reminders" ON booking_reminders;
 CREATE POLICY "Admins manage booking reminders"
   ON booking_reminders FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (private.is_admin())
+  WITH CHECK (private.is_admin());
 
 DROP POLICY IF EXISTS "Admins manage notification preferences" ON notification_preferences;
 CREATE POLICY "Admins manage notification preferences"
   ON notification_preferences FOR ALL TO authenticated
-  USING (user_id = auth.uid() OR is_admin())
-  WITH CHECK (user_id = auth.uid() OR is_admin());
+  USING (user_id = auth.uid() OR private.is_admin())
+  WITH CHECK (user_id = auth.uid() OR private.is_admin());
 
 -- Storage policies
 DROP POLICY IF EXISTS "Admins upload booking files" ON storage.objects;
 CREATE POLICY "Admins upload booking files"
   ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'booking-files' AND is_admin());
+  WITH CHECK (bucket_id = 'booking-files' AND private.is_admin());
 
 DROP POLICY IF EXISTS "Admins read booking files" ON storage.objects;
 CREATE POLICY "Admins read booking files"
   ON storage.objects FOR SELECT TO authenticated
-  USING (bucket_id = 'booking-files' AND is_admin());
+  USING (bucket_id = 'booking-files' AND private.is_admin());
 
 DROP POLICY IF EXISTS "Admins update booking files" ON storage.objects;
 CREATE POLICY "Admins update booking files"
   ON storage.objects FOR UPDATE TO authenticated
-  USING (bucket_id = 'booking-files' AND is_admin());
+  USING (bucket_id = 'booking-files' AND private.is_admin());
 
 DROP POLICY IF EXISTS "Admins delete booking files" ON storage.objects;
 CREATE POLICY "Admins delete booking files"
   ON storage.objects FOR DELETE TO authenticated
-  USING (bucket_id = 'booking-files' AND is_admin());
+  USING (bucket_id = 'booking-files' AND private.is_admin());
 
 -- Note: Client portal access is handled exclusively via service-role
 -- API routes that validate portal tokens / sessions. Clients never
