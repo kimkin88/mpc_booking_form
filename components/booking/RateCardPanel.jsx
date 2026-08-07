@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { Checkbox } from '@/components/ui/Switch';
 import {
   hasBudgetCap,
+  RATE_CARD_PACKAGES,
   ratesFromBooking,
   remainingBudget,
   shootRowsCost,
@@ -25,11 +26,23 @@ const Title = styled.h2`
   font-weight: ${({ theme }) => theme.fontWeights.semibold};
 `;
 
-const Meta = styled.p`
+const Meta = styled.div`
   margin: 0 0 ${({ theme }) => theme.space[3]};
   font-size: ${({ theme }) => theme.fontSizes.xs};
   color: ${({ theme }) => theme.colors.textMuted};
-  line-height: 1.4;
+  line-height: 1.45;
+`;
+
+const MetaTitle = styled.div`
+  margin-bottom: 0.35rem;
+  font-weight: ${({ theme }) => theme.fontWeights.semibold};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const PackageLine = styled.div`
+  & + & {
+    margin-top: 0.2rem;
+  }
 `;
 
 const Row = styled.div`
@@ -83,8 +96,12 @@ export function RateCardPanel({
     <Card>
       <Title>Rate card</Title>
       <Meta>
-        {rates.label}: {money(rates.fullDay, currency)} = 1 day ·{' '}
-        {money(rates.halfDay, currency)} = 0.5 day
+        <MetaTitle>{rates.label}</MetaTitle>
+        {RATE_CARD_PACKAGES.map((pkg) => (
+          <PackageLine key={pkg.value}>
+            {money(rates[pkg.rateKey], currency)} = {pkg.label}
+          </PackageLine>
+        ))}
       </Meta>
       <Row>
         <span>
@@ -129,7 +146,7 @@ export function RateCardPanel({
             onChange={(e) => onChange?.('rate_card_label', e.target.value)}
           />
           <Input
-            label="0.5 day rate"
+            label="0.5 Day - 5 fully retouched images"
             name="half_day_rate"
             type="number"
             step="0.01"
@@ -140,7 +157,7 @@ export function RateCardPanel({
             }
           />
           <Input
-            label="1 day rate"
+            label="1 Day - 10 fully retouched images"
             name="full_day_rate"
             type="number"
             step="0.01"

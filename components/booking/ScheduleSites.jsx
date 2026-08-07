@@ -24,6 +24,7 @@ import {
   uniqueLiveFormats,
 } from '@/lib/calendarFormats';
 import { CalendarDayModal } from '@/components/booking/CalendarDayModal';
+import { dayLengthLabel } from '@/lib/rateCard';
 
 const CAL_ACCENT = SHOOT_DAY_COLOR;
 
@@ -747,8 +748,7 @@ export function CalendarSection({
                     <DayCardsGrid>
                       {selectedShoots.map((entry) => {
                         const who = scheduleAddedByMeta(entry);
-                        const length =
-                          Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
+                        const length = dayLengthLabel(entry.day_length);
                         return (
                           <FormatCard
                             key={entry.id || `shoot-${entry.shoot_date}-${entry.city}`}

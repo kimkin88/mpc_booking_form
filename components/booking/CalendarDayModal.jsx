@@ -16,7 +16,7 @@ import {
   scheduleAddedByMeta,
   SHOOT_DAY_COLOR,
 } from '@/lib/calendarFormats';
-import { MARKET_CITIES } from '@/lib/rateCard';
+import { DAY_LENGTH_OPTIONS, dayLengthLabel, MARKET_CITIES } from '@/lib/rateCard';
 import { toDateInputValue } from '@/utils/format';
 
 const SectionLabel = styled.h4`
@@ -361,7 +361,7 @@ export function CalendarDayModal({
               dayEntries.map(({ entry, kind }) => {
                 if (kind === 'shoot') {
                   const who = scheduleAddedByMeta(entry);
-                  const length = Number(entry.day_length) === 0.5 ? '0.5 day' : '1 day';
+                  const length = dayLengthLabel(entry.day_length);
                   return (
                     <ActionRow key={entry.id || `shoot-${entry.shoot_date}`} $soft="#F8EDE8">
                       <ActionMain>
@@ -600,10 +600,7 @@ export function CalendarDayModal({
                     required
                     value={shootDraft.day_length}
                     onValueChange={(v) => setShootDraft((d) => ({ ...d, day_length: v }))}
-                    options={[
-                      { value: '0.5', label: '0.5 day' },
-                      { value: '1', label: '1 day' },
-                    ]}
+                    options={DAY_LENGTH_OPTIONS}
                     disabled={busy || !onAdd}
                   />
                   <Select

@@ -12,8 +12,11 @@ import {
   affordableDayLengths,
   canAddShootRow,
   costForDayLength,
+  DAY_LENGTH_OPTIONS,
+  dayLengthLabel,
   hasBudgetCap,
   MARKET_CITIES,
+  RATE_CARD_PACKAGES,
   ratesFromBooking,
   remainingBudget,
   shootRowsCost,
@@ -134,15 +137,10 @@ export function ShootRequirementsSection({
   const showDraftRow = draftOpen && canAddMore;
 
   const draftOptions = useMemo(() => {
-    const base = budgetSet
-      ? affordableDayLengths(budget, entries, rates)
-      : [
-          { value: '0.5', label: '0.5 day' },
-          { value: '1', label: '1 day' },
-        ];
+    const base = budgetSet ? affordableDayLengths(budget, entries, rates) : DAY_LENGTH_OPTIONS;
     return base.map((opt) => ({
       value: opt.value,
-      label: `${opt.label || `${opt.value} day`} (${money(costForDayLength(opt.value, rates), currency)})`,
+      label: `${opt.label || dayLengthLabel(opt.value)} (${money(costForDayLength(opt.value, rates), currency)})`,
     }));
   }, [budget, budgetSet, currency, entries, rates]);
 
@@ -211,10 +209,7 @@ export function ShootRequirementsSection({
     setWarning('');
     const options = budgetSet
       ? affordableDayLengths(budget, entries, rates)
-      : [
-          { value: '0.5', label: '0.5 day' },
-          { value: '1', label: '1 day' },
-        ];
+      : DAY_LENGTH_OPTIONS;
     setDraft({
       ...emptyDraft(),
       day_length: defaultDraftDayLength(options),
@@ -307,8 +302,14 @@ export function ShootRequirementsSection({
     <Section id={id}>
       <SectionTitle>Shoot requirements</SectionTitle>
       <SectionHint>
-        {rates.label}: {money(rates.fullDay, currency)} = 1 day ·{' '}
-        {money(rates.halfDay, currency)} = 0.5 day.
+        {rates.label}:{' '}
+        {RATE_CARD_PACKAGES.map((pkg, i) => (
+          <span key={pkg.value}>
+            {i > 0 ? ' · ' : null}
+            {money(rates[pkg.rateKey], currency)} = {pkg.label}
+          </span>
+        ))}
+        .
         {budgetSet
           ? ' Use + to add a shoot row when remaining budget allows.'
           : ' Set a shoot budget above before adding shoot rows.'}
@@ -341,15 +342,15 @@ export function ShootRequirementsSection({
                 label: `${opt.label} (${money(costForDayLength(opt.value, rates), currency)})`,
               })
             )
-          : [
-              { value: '0.5', label: '0.5 day' },
-              { value: '1', label: '1 day' },
-            ];
+          : DAY_LENGTH_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: opt.label,
+            }));
         const current = String(entry.day_length ?? '1');
         if (!lengthOpts.some((o) => o.value === current)) {
           lengthOpts.unshift({
             value: current,
-            label: `${current} day (current)`,
+            label: `${dayLengthLabel(current)} (current)`,
           });
         }
         const rowCost =
