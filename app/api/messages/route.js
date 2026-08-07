@@ -8,7 +8,7 @@ export async function GET() {
 
   try {
     const [threads, unread] = await Promise.all([
-      listAdminMessageThreads({ limit: 40 }),
+      listAdminMessageThreads({ limit: 200 }),
       countUnreadForAdmin(),
     ]);
     return jsonOk({ threads, unread });

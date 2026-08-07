@@ -65,51 +65,101 @@ export async function countUnreadForClient(bookingId) {
   return count || 0;
 }
 
-/** Recent threads for admin inbox (one row per booking with latest message). */
-export async function listAdminMessageThreads({ limit = 40 } = {}) {
+/** Admin inbox: one row per booking that has a portal, with latest message when any. */
+export async function listAdminMessageThreads({ limit = 200 } = {}) {
   const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from('booking_messages')
-    .select('id, booking_id, sender_role, sender_name, body, created_at, read_by_admin_at')
-    .order('created_at', { ascending: false })
-    .limit(300);
 
-  if (error) throw new Error(error.message);
+  const { data: portals, error: portalsError } = await supabase
+    .from('portal_access')
+    .select(
+      `
+      id,
+      booking_id,
+      status,
+      created_at,
+      bookings!inner (
+        id,
+        sb_number,
+        campaign_name,
+        client_name,
+        client_company,
+        client_email
+      )
+    `
+    )
+    .order('created_at', { ascending: false });
 
-  const byBooking = new Map();
-  for (const row of data || []) {
-    if (byBooking.has(row.booking_id)) continue;
-    byBooking.set(row.booking_id, row);
-    if (byBooking.size >= limit) break;
+  if (portalsError) throw new Error(portalsError.message);
+
+  // Newest portal row wins when a booking has more than one.
+  const portalByBooking = new Map();
+  for (const row of portals || []) {
+    if (!portalByBooking.has(row.booking_id)) {
+      portalByBooking.set(row.booking_id, row);
+    }
   }
 
-  const bookingIds = [...byBooking.keys()];
+  const bookingIds = [...portalByBooking.keys()];
   if (!bookingIds.length) return [];
 
-  const { data: bookings } = await supabase
-    .from('bookings')
-    .select('id, sb_number, campaign_name, client_name, client_company, client_email')
-    .in('id', bookingIds);
+  const [{ data: messages, error: messagesError }, { data: unreadRows, error: unreadError }] =
+    await Promise.all([
+      supabase
+        .from('booking_messages')
+        .select('id, booking_id, sender_role, sender_name, body, created_at, read_by_admin_at')
+        .in('booking_id', bookingIds)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('booking_messages')
+        .select('booking_id')
+        .in('booking_id', bookingIds)
+        .eq('sender_role', 'client')
+        .is('read_by_admin_at', null),
+    ]);
 
-  const bookingMap = new Map((bookings || []).map((b) => [b.id, b]));
+  if (messagesError) throw new Error(messagesError.message);
+  if (unreadError) throw new Error(unreadError.message);
 
-  const unreadCounts = await Promise.all(
-    bookingIds.map(async (id) => [id, await countUnreadForAdmin(id)])
-  );
-  const unreadMap = new Map(unreadCounts);
+  const latestByBooking = new Map();
+  for (const row of messages || []) {
+    if (!latestByBooking.has(row.booking_id)) {
+      latestByBooking.set(row.booking_id, row);
+    }
+  }
 
-  return bookingIds.map((id) => {
-    const latest = byBooking.get(id);
-    const booking = bookingMap.get(id) || {};
+  const unreadMap = new Map();
+  for (const row of unreadRows || []) {
+    unreadMap.set(row.booking_id, (unreadMap.get(row.booking_id) || 0) + 1);
+  }
+
+  const threads = bookingIds.map((id) => {
+    const portal = portalByBooking.get(id);
+    const booking = portal?.bookings || {};
+    const latest = latestByBooking.get(id);
     return {
       booking_id: id,
+      portal_id: portal?.id || null,
+      portal_status: portal?.status || null,
       sb_number: booking.sb_number || null,
       campaign_name: booking.campaign_name || null,
-      client_label: clientDisplayName(booking) || booking.campaign_name || booking.sb_number || 'Booking',
+      client_label:
+        clientDisplayName(booking) || booking.campaign_name || booking.sb_number || 'Booking',
       latest_message: latest ? mapMessage(latest) : null,
       unread_count: unreadMap.get(id) || 0,
+      portal_created_at: portal?.created_at || null,
     };
   });
+
+  threads.sort((a, b) => {
+    const aUnread = a.unread_count > 0 ? 1 : 0;
+    const bUnread = b.unread_count > 0 ? 1 : 0;
+    if (bUnread !== aUnread) return bUnread - aUnread;
+    const aTime = a.latest_message?.created_at || a.portal_created_at || '';
+    const bTime = b.latest_message?.created_at || b.portal_created_at || '';
+    return String(bTime).localeCompare(String(aTime));
+  });
+
+  return threads.slice(0, Math.min(Math.max(Number(limit) || 200, 1), 500));
 }
 
 export async function sendBookingMessage({

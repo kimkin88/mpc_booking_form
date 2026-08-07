@@ -5,12 +5,14 @@ import Link from 'next/link';
 import styled from 'styled-components';
 import { Modal } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { api, portalRequest } from '@/lib/apiClient';
 import { formatRelative } from '@/utils/format';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
 import { useBookingMessagesTarget } from '@/contexts/BookingMessagesContext';
 import { useVisibilityInterval } from '@/hooks/useVisibilityInterval';
 import { useToast } from '@/components/ui/Toast';
+import { useDebouncedValue } from '@/hooks/useUnsavedChanges';
 
 const Trigger = styled.button`
   position: relative;
@@ -82,7 +84,7 @@ const Layout = styled.div`
   overflow: hidden;
 
   @media (min-width: ${({ theme }) => theme.breakpoints.md}) {
-    grid-template-columns: ${({ $inbox }) => ($inbox ? '13rem minmax(0, 1fr)' : '1fr')};
+    grid-template-columns: ${({ $inbox }) => ($inbox ? '16rem minmax(0, 1fr)' : '1fr')};
   }
 `;
 
@@ -90,11 +92,11 @@ const Inbox = styled.div`
   display: ${({ $show }) => ($show ? 'flex' : 'none')};
   flex-direction: column;
   min-height: 0;
-  max-height: 9rem;
-  overflow: auto;
-  overflow-anchor: none;
+  max-height: 14rem;
+  overflow: hidden;
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
   padding-bottom: ${({ theme }) => theme.space[2]};
+  gap: ${({ theme }) => theme.space[2]};
 
   @media (min-width: ${({ theme }) => theme.breakpoints.md}) {
     max-height: none;
@@ -103,6 +105,19 @@ const Inbox = styled.div`
     padding-bottom: 0;
     padding-right: ${({ theme }) => theme.space[2]};
   }
+`;
+
+const InboxSearch = styled.div`
+  flex-shrink: 0;
+`;
+
+const InboxList = styled.div`
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  padding-right: 0.15rem;
 `;
 
 const ThreadBtn = styled.button`
@@ -284,6 +299,8 @@ export function MessagesButton({ variant = 'admin', token = null }) {
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const [threads, setThreads] = useState([]);
+  const [portalSearch, setPortalSearch] = useState('');
+  const debouncedPortalSearch = useDebouncedValue(portalSearch, 200);
   const [activeBookingId, setActiveBookingId] = useState(null);
   const [threadLabel, setThreadLabel] = useState('');
   const [messages, setMessages] = useState([]);
@@ -385,6 +402,7 @@ export function MessagesButton({ variant = 'admin', token = null }) {
   const openPanel = async () => {
     setOpen(true);
     setDraft('');
+    setPortalSearch('');
     if (isPortal) {
       setActiveBookingId('portal');
       setThreadLabel('Messages with MPC');
@@ -405,6 +423,25 @@ export function MessagesButton({ variant = 'admin', token = null }) {
       setThreadLabel('');
     }
   };
+
+  const searchQuery = String(debouncedPortalSearch || '')
+    .trim()
+    .toLowerCase();
+  const filteredThreads = !searchQuery
+    ? threads
+    : threads.filter((thread) => {
+        const haystack = [
+          thread.sb_number,
+          thread.client_label,
+          thread.campaign_name,
+          thread.latest_message?.body,
+          thread.portal_status,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(searchQuery);
+      });
 
   const selectThread = async (thread) => {
     setActiveBookingId(thread.booking_id);
@@ -462,7 +499,7 @@ export function MessagesButton({ variant = 'admin', token = null }) {
         description={
           isPortal
             ? 'Chat with your MPC booking team about this booking.'
-            : 'Exchange messages with the client portal for a booking.'
+            : 'Message any client portal. Search and pick a booking on the left.'
         }
         size="lg"
         scrollable
@@ -476,30 +513,43 @@ export function MessagesButton({ variant = 'admin', token = null }) {
           <Layout $inbox={showInbox}>
             {showInbox && (
               <Inbox $show>
-                {threads.length === 0 ? (
-                  <Empty style={{ margin: '1rem 0' }}>No conversations yet.</Empty>
-                ) : (
-                  threads.map((thread) => (
-                    <ThreadBtn
-                      key={thread.booking_id}
-                      type="button"
-                      $active={activeBookingId === thread.booking_id}
-                      $unread={thread.unread_count > 0}
-                      onClick={() => selectThread(thread)}
-                    >
-                      <ThreadTitle>
-                        {thread.sb_number || 'Booking'}
-                        {thread.unread_count > 0 ? ` · ${thread.unread_count}` : ''}
-                      </ThreadTitle>
-                      <ThreadMeta>
-                        {thread.client_label}
-                        {thread.latest_message?.body
-                          ? ` — ${thread.latest_message.body}`
-                          : ''}
-                      </ThreadMeta>
-                    </ThreadBtn>
-                  ))
-                )}
+                <InboxSearch>
+                  <Input
+                    aria-label="Search portals"
+                    placeholder="Search portals…"
+                    value={portalSearch}
+                    onChange={(e) => setPortalSearch(e.target.value)}
+                    fullWidth
+                  />
+                </InboxSearch>
+                <InboxList>
+                  {threads.length === 0 ? (
+                    <Empty style={{ margin: '1rem 0' }}>No portals created yet.</Empty>
+                  ) : filteredThreads.length === 0 ? (
+                    <Empty style={{ margin: '1rem 0' }}>No portals match your search.</Empty>
+                  ) : (
+                    filteredThreads.map((thread) => (
+                      <ThreadBtn
+                        key={thread.booking_id}
+                        type="button"
+                        $active={activeBookingId === thread.booking_id}
+                        $unread={thread.unread_count > 0}
+                        onClick={() => selectThread(thread)}
+                      >
+                        <ThreadTitle>
+                          {thread.sb_number || 'Booking'}
+                          {thread.unread_count > 0 ? ` · ${thread.unread_count}` : ''}
+                        </ThreadTitle>
+                        <ThreadMeta>
+                          {thread.client_label}
+                          {thread.latest_message?.body
+                            ? ` — ${thread.latest_message.body}`
+                            : ' — No messages yet'}
+                        </ThreadMeta>
+                      </ThreadBtn>
+                    ))
+                  )}
+                </InboxList>
               </Inbox>
             )}
 
@@ -508,7 +558,7 @@ export function MessagesButton({ variant = 'admin', token = null }) {
                 <Empty>
                   {contextBookingId
                     ? 'Loading conversation…'
-                    : 'Open a booking, or pick a conversation on the left to message the client.'}
+                    : 'Pick a portal on the left to message the client.'}
                 </Empty>
               ) : (
                 <>
