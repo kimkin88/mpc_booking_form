@@ -1,13 +1,14 @@
-import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { jsonOk, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import { createServiceClient } from '@/lib/supabase/admin';
 import { clientDisplayName } from '@/utils/helpers';
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const { searchParams } = new URL(request.url);
     const section = searchParams.get('section');
     const action = searchParams.get('action');
@@ -17,13 +18,7 @@ export async function GET(request, { params }) {
     const limit = Number(searchParams.get('limit') || 200);
 
     const supabase = createServiceClient();
-
-    const { data: booking } = await supabase
-      .from('bookings')
-      .select('client_name, client_company, client_email')
-      .eq('id', id)
-      .maybeSingle();
-
+    const booking = gate.data?.booking || null;
     const fallbackClientName = clientDisplayName(booking || {});
 
     let query = supabase

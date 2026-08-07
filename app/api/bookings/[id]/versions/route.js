@@ -1,13 +1,14 @@
-import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { jsonOk, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import { getVersion, listVersions } from '@/services/versionService';
 import { previewRevert, revertBooking } from '@/services/revertService';
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const { searchParams } = new URL(request.url);
     const versionNumber = searchParams.get('version');
 
@@ -24,11 +25,11 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
 
     if (body.action === 'preview') {
@@ -47,7 +48,7 @@ export async function POST(request, { params }) {
         section: body.section,
         fieldName: body.fieldName,
         fileId: body.fileId,
-        actor: auth.actor,
+        actor: gate.actor,
       });
       return jsonOk(result);
     }

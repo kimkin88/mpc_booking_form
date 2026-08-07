@@ -445,6 +445,12 @@ const NAV_ITEMS = [
     label: 'New Booking',
     match: (p) => p === '/admin/bookings/new',
   },
+  {
+    href: '/admin/team',
+    label: 'Team',
+    match: (p) => p.startsWith('/admin/team'),
+    mainAdminOnly: true,
+  },
 ];
 
 export function AdminShell({ children, wide = false }) {
@@ -459,7 +465,10 @@ export function AdminShell({ children, wide = false }) {
 
   const displayName = profile?.full_name || user?.name || user?.email || 'Admin';
   const username = user?.email || 'admin';
-  const roleLabel = profile?.role === 'admin' || user?.role === 'admin' ? 'Admin' : 'User';
+  const role = profile?.role || user?.role || 'admin';
+  const roleLabel =
+    role === 'main_admin' ? 'Main admin' : role === 'admin' ? 'Admin' : 'User';
+  const isMainAdmin = role === 'main_admin';
 
   const usageRequestKey = settingsOpen ? 'open' : 'closed';
   const [activeUsageKey, setActiveUsageKey] = useState(usageRequestKey);
@@ -507,7 +516,7 @@ export function AdminShell({ children, wide = false }) {
   };
 
   const renderNavLinks = () =>
-    NAV_ITEMS.map((item) => {
+    NAV_ITEMS.filter((item) => !item.mainAdminOnly || isMainAdmin).map((item) => {
       const active = item.match(pathname);
       return (
         <NavLink

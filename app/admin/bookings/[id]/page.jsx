@@ -40,6 +40,7 @@ import { useRecentClientUpdates } from '@/hooks/useRecentClientUpdates';
 import { useBookingRemoteSync } from '@/hooks/useBookingRemoteSync';
 import { bookingSyncFingerprint } from '@/lib/syncFingerprints';
 import { useDataRefresh } from '@/contexts/DataRefreshContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatDateTime } from '@/utils/format';
 
 const DocumentImportDialog = dynamic(
@@ -477,10 +478,13 @@ export default function BookingDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isMainAdmin = user?.role === 'main_admin';
   useRegisterBookingMessages(id);
 
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
+  const [adminOptions, setAdminOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -532,6 +536,25 @@ export default function BookingDetailPage() {
     setRemoteAhead(false);
     return result;
   }, [id]);
+
+  useEffect(() => {
+    if (!isMainAdmin) {
+      setAdminOptions([]);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await api.get('/api/admins');
+        if (!cancelled) setAdminOptions(result?.admins || []);
+      } catch {
+        if (!cancelled) setAdminOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isMainAdmin]);
 
   const applyRemoteBooking = useCallback(
     (result, meta = {}) => {
@@ -687,7 +710,7 @@ export default function BookingDetailPage() {
       delete payload.id;
       delete payload.created_at;
       delete payload.updated_at;
-      delete payload.created_by;
+      if (!isMainAdmin) delete payload.created_by;
       delete payload.current_version;
 
       await api.patch(`/api/bookings/${id}`, payload);
@@ -887,6 +910,8 @@ export default function BookingDetailPage() {
                     onChange={onChange}
                     errors={errors}
                     showAdminOwnership
+                    canReassignOwner={isMainAdmin}
+                    adminOptions={adminOptions}
                     scheduleEntries={shootEntries}
                     poFiles={
                       <PoDocumentUploader

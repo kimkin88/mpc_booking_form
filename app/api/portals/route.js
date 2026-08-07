@@ -1,4 +1,5 @@
 import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { ownedByFilter } from '@/lib/adminAccess';
 import { createServiceClient } from '@/lib/supabase/admin';
 import { buildPortalUrl } from '@/lib/crypto';
 
@@ -10,12 +11,14 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const search = searchParams.get('search') || '';
+    const ownerId = ownedByFilter(auth.actor);
 
     const supabase = createServiceClient();
 
     let query = supabase
       .from('portal_access')
-      .select(`
+      .select(
+        `
         id,
         booking_id,
         access_token,
@@ -35,10 +38,16 @@ export async function GET(request) {
           client_company,
           client_name,
           client_email,
-          status
+          status,
+          created_by
         )
-      `)
+      `
+      )
       .order('created_at', { ascending: false });
+
+    if (ownerId) {
+      query = query.eq('bookings.created_by', ownerId);
+    }
 
     if (status && status !== 'all') {
       query = query.eq('status', status);

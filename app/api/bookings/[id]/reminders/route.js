@@ -1,20 +1,20 @@
-import { requireAdmin, jsonOk, jsonError, jsonCreated } from '@/lib/api';
+import { jsonOk, jsonError, jsonCreated } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import {
   listRemindersForBooking,
   sendMissingFieldsReminder,
 } from '@/services/reminderService';
 import { detectMissingFields } from '@/lib/missingFields';
-import { getBooking } from '@/services/bookingService';
 import { createServiceClient } from '@/lib/supabase/admin';
 
 export async function GET(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const reminders = await listRemindersForBooking(id);
-    const detail = await getBooking(id);
+    const detail = gate.data;
     const missing = detectMissingFields({
       booking: detail.booking,
       schedule: detail.schedule,
@@ -33,11 +33,11 @@ export async function GET(_request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json().catch(() => ({}));
     const action = body.action || 'resend';
 
@@ -60,8 +60,8 @@ export async function POST(request, { params }) {
         reminderType: 'manual',
         force: true,
         actor: {
-          id: auth.actor.id,
-          name: auth.actor.name,
+          id: gate.actor.id,
+          name: gate.actor.name,
           role: 'admin',
         },
         source: 'admin_portal',

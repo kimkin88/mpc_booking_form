@@ -2,22 +2,24 @@
 
 ## 1. Application roles
 
-| Capability | Admin (`profiles.role = admin`) | Portal client (token ± PIN) | Unauthenticated |
-|------------|----------------------------------|-----------------------------|-----------------|
-| Sign in to `/admin` | Yes | No | Login page only |
-| List / create / delete bookings | Yes | No | No |
-| Edit booking fields (admin form) | Yes | No | No |
-| Manage schedule & sites APIs | Yes | Limited portal booking API for permitted actions | No |
-| Generate / manage portal link | Yes | No | No |
-| Set field permissions & status editability | Yes | Subject to them | No |
-| Upload/manage files (full) | Yes | Permitted categories; soft-delete limits | No |
-| Document parse / OpenAI import | Yes | No | No |
-| Activity & version revert | Yes | Sees limited recent updates only | No |
-| Notifications bell | Yes | No | No |
-| Open `/portal/[token]` | Yes (preview) | Yes | With valid token |
-| Submit portal form | Via status change | Yes (when editable) | No |
-| Change own password | Yes | N/A | No |
-| User directory / invite UI | **Not implemented** | N/A | N/A |
+| Capability | Main admin (`main_admin`) | Admin (`admin`) | Portal client (token ± PIN) | Unauthenticated |
+|------------|---------------------------|-----------------|-----------------------------|-----------------|
+| Sign in to `/admin` | Yes | Yes | No | Login page only |
+| List / create bookings | All bookings | Own bookings only (`created_by`) | No | No |
+| Open / edit / delete a booking | Any | Only if assigned (`created_by`) | No | No |
+| Reassign booking ownership | Yes | No | No | No |
+| Manage Team (create admins + roles) | Yes | No | No | No |
+| Manage schedule & sites APIs | Yes (all) | Own bookings | Limited portal booking API | No |
+| Generate / manage portal link | Yes (all) | Own bookings | No | No |
+| Set field permissions & status editability | Yes | Own bookings | Subject to them | No |
+| Upload/manage files (full) | Yes | Own bookings | Permitted categories | No |
+| Document parse / OpenAI import | Yes | Yes | No | No |
+| Activity & version revert | Yes | Own bookings | Sees limited recent updates only | No |
+| Notifications / messages | All | Own bookings | No | No |
+| Open `/portal/[token]` | Yes (preview) | Yes (preview) | Yes | With valid token |
+| Submit portal form | Via status change | Via status change | Yes (when editable) | No |
+| Change own password | Yes | Yes | N/A | No |
+| User directory / create admins | **Team** page (create + roles) | No | N/A | N/A |
 
 ---
 

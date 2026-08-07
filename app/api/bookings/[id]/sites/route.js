@@ -1,29 +1,35 @@
-import { requireAdmin, jsonOk, jsonCreated, jsonError } from '@/lib/api';
+import { jsonOk, jsonCreated, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import { validateSiteEntry } from '@/lib/validation';
 import { createServiceClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/services/activityService';
 import { bumpVersionAndSnapshot } from '@/services/versionService';
 
 export async function GET(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-  const { id } = await params;
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from('site_entries')
-    .select('*')
-    .eq('booking_id', id)
-    .order('created_at');
-  if (error) return jsonError(error.message, 500);
-  return jsonOk(data);
+  try {
+    const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from('site_entries')
+      .select('*')
+      .eq('booking_id', id)
+      .order('created_at');
+    if (error) return jsonError(error.message, 500);
+    return jsonOk(data);
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const validation = validateSiteEntry(body);
     if (!validation.success) {
@@ -40,16 +46,16 @@ export async function POST(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'site_entry_added',
       section: 'sites',
@@ -64,11 +70,11 @@ export async function POST(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const { entryId, ...rest } = body;
     const validation = validateSiteEntry(rest);
@@ -88,16 +94,16 @@ export async function PATCH(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'site_entry_updated',
       section: 'sites',
@@ -112,11 +118,11 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const { entryId, removeAll } = body;
     const supabase = createServiceClient();
@@ -137,16 +143,16 @@ export async function DELETE(request, { params }) {
       if (error) return jsonError(error.message, 500);
 
       const { versionNumber } = await bumpVersionAndSnapshot(id, {
-        id: auth.actor.id,
-        name: auth.actor.name,
+        id: gate.actor.id,
+        name: gate.actor.name,
         source: 'admin_portal',
       });
 
       await logActivity({
         bookingId: id,
         versionNumber,
-        actorId: auth.actor.id,
-        actorName: auth.actor.name,
+        actorId: gate.actor.id,
+        actorName: gate.actor.name,
         actorRole: 'admin',
         action: 'site_entry_removed',
         section: 'sites',
@@ -174,16 +180,16 @@ export async function DELETE(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'site_entry_removed',
       section: 'sites',

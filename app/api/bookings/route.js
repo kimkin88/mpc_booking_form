@@ -1,4 +1,5 @@
 import { requireAdmin, jsonOk, jsonCreated, jsonError } from '@/lib/api';
+import { ownedByFilter } from '@/lib/adminAccess';
 import { validateCreateBooking } from '@/lib/validation';
 import { createBooking, listBookings, generateNextSbNumber } from '@/services/bookingService';
 
@@ -20,7 +21,14 @@ export async function GET(request) {
       return jsonOk({ sb_number });
     }
 
-    const data = await listBookings({ search, status, page, pageSize, sort });
+    const data = await listBookings({
+      search,
+      status,
+      page,
+      pageSize,
+      sort,
+      createdBy: ownedByFilter(auth.actor),
+    });
     return jsonOk(data);
   } catch (err) {
     return jsonError(err.message, 500);

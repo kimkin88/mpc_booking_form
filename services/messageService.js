@@ -40,8 +40,27 @@ export async function listBookingMessages(bookingId, { limit = 200 } = {}) {
   return (data || []).map(mapMessage);
 }
 
-export async function countUnreadForAdmin(bookingId = null) {
+export async function countUnreadForAdmin(bookingId = null, { createdBy = null } = {}) {
   const supabase = createServiceClient();
+
+  if (createdBy && !bookingId) {
+    const { data: owned, error: ownedError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('created_by', createdBy);
+    if (ownedError) throw new Error(ownedError.message);
+    const ids = (owned || []).map((b) => b.id);
+    if (!ids.length) return 0;
+    const { count, error } = await supabase
+      .from('booking_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('sender_role', 'client')
+      .is('read_by_admin_at', null)
+      .in('booking_id', ids);
+    if (error) throw new Error(error.message);
+    return count || 0;
+  }
+
   let query = supabase
     .from('booking_messages')
     .select('id', { count: 'exact', head: true })
@@ -66,10 +85,10 @@ export async function countUnreadForClient(bookingId) {
 }
 
 /** Admin inbox: one row per booking that has a portal, with latest message when any. */
-export async function listAdminMessageThreads({ limit = 200 } = {}) {
+export async function listAdminMessageThreads({ limit = 200, createdBy = null } = {}) {
   const supabase = createServiceClient();
 
-  const { data: portals, error: portalsError } = await supabase
+  let portalsQuery = supabase
     .from('portal_access')
     .select(
       `
@@ -83,11 +102,18 @@ export async function listAdminMessageThreads({ limit = 200 } = {}) {
         campaign_name,
         client_name,
         client_company,
-        client_email
+        client_email,
+        created_by
       )
     `
     )
     .order('created_at', { ascending: false });
+
+  if (createdBy) {
+    portalsQuery = portalsQuery.eq('bookings.created_by', createdBy);
+  }
+
+  const { data: portals, error: portalsError } = await portalsQuery;
 
   if (portalsError) throw new Error(portalsError.message);
 

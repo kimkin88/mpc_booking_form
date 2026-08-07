@@ -1,20 +1,17 @@
-import { requireAdmin, jsonOk, jsonError, jsonCreated, getRequestMeta } from '@/lib/api';
+import { jsonOk, jsonError, jsonCreated, getRequestMeta } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import {
   listBookingMessages,
   sendBookingMessage,
   markBookingMessagesRead,
   countUnreadForAdmin,
 } from '@/services/messageService';
-import { getBooking } from '@/services/bookingService';
 
 export async function GET(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
-    const booking = await getBooking(id);
-    if (!booking) return jsonError('Booking not found', 404);
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
 
     const [messages, unread] = await Promise.all([
       listBookingMessages(id),
@@ -28,21 +25,18 @@ export async function GET(_request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
-    const booking = await getBooking(id);
-    if (!booking) return jsonError('Booking not found', 404);
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
 
     const payload = await request.json();
     const meta = getRequestMeta(request);
     const message = await sendBookingMessage({
       bookingId: id,
       senderRole: 'admin',
-      senderId: auth.user?.id || null,
-      senderName: auth.actor?.name || auth.profile?.full_name || auth.user?.email || 'Admin',
+      senderId: gate.user?.id || null,
+      senderName: gate.actor?.name || gate.profile?.full_name || gate.user?.email || 'Admin',
       body: payload?.body,
       requestMeta: meta,
     });
@@ -54,13 +48,10 @@ export async function POST(request, { params }) {
 }
 
 export async function PATCH(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
-    const booking = await getBooking(id);
-    if (!booking) return jsonError('Booking not found', 404);
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
 
     await markBookingMessagesRead(id, 'admin');
     return jsonOk({ unread: 0 });

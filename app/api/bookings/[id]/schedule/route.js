@@ -1,4 +1,5 @@
-import { requireAdmin, jsonOk, jsonCreated, jsonError } from '@/lib/api';
+import { jsonOk, jsonCreated, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import { validateScheduleEntry } from '@/lib/validation';
 import { createServiceClient } from '@/lib/supabase/admin';
 import { logActivity } from '@/services/activityService';
@@ -49,25 +50,30 @@ function normalizeSchedulePayload(data, booking, { actor } = {}) {
 }
 
 export async function GET(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-  const { id } = await params;
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from('schedule_entries')
-    .select('*')
-    .eq('booking_id', id)
-    .order('shoot_date');
-  if (error) return jsonError(error.message, 500);
-  return jsonOk(data);
+  try {
+    const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from('schedule_entries')
+      .select('*')
+      .eq('booking_id', id)
+      .order('shoot_date');
+    if (error) return jsonError(error.message, 500);
+    return jsonOk(data);
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const validation = validateScheduleEntry(body);
     if (!validation.success) {
@@ -81,7 +87,7 @@ export async function POST(request, { params }) {
       supabase.from('schedule_entries').select('*').eq('booking_id', id),
     ]);
     const row = normalizeSchedulePayload(validation.data, booking, {
-      actor: { name: auth.actor.name, source: 'admin_portal' },
+      actor: { name: gate.actor.name, source: 'admin_portal' },
     });
     if (booking && row.day_length != null) {
       try {
@@ -101,8 +107,8 @@ export async function POST(request, { params }) {
       .insert({
         booking_id: id,
         ...row,
-        created_by: auth.actor.id,
-        updated_by: auth.actor.id,
+        created_by: gate.actor.id,
+        updated_by: gate.actor.id,
       })
       .select()
       .single();
@@ -110,16 +116,16 @@ export async function POST(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'schedule_entry_added',
       section: 'schedule',
@@ -136,11 +142,11 @@ export async function POST(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const { entryId, ...rest } = body;
     if (!entryId) return jsonError('entryId is required', 400);
@@ -173,7 +179,7 @@ export async function PATCH(request, { params }) {
 
     const { data, error } = await supabase
       .from('schedule_entries')
-      .update({ ...row, updated_by: auth.actor.id })
+      .update({ ...row, updated_by: gate.actor.id })
       .eq('id', entryId)
       .eq('booking_id', id)
       .select()
@@ -182,16 +188,16 @@ export async function PATCH(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'schedule_entry_updated',
       section: 'schedule',
@@ -208,11 +214,11 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const supabase = createServiceClient();
 
@@ -235,16 +241,16 @@ export async function DELETE(request, { params }) {
       if (error) return jsonError(error.message, 500);
 
       const { versionNumber } = await bumpVersionAndSnapshot(id, {
-        id: auth.actor.id,
-        name: auth.actor.name,
+        id: gate.actor.id,
+        name: gate.actor.name,
         source: 'admin_portal',
       });
 
       await logActivity({
         bookingId: id,
         versionNumber,
-        actorId: auth.actor.id,
-        actorName: auth.actor.name,
+        actorId: gate.actor.id,
+        actorName: gate.actor.name,
         actorRole: 'admin',
         action: 'schedule_entry_removed',
         section: 'schedule',
@@ -287,7 +293,7 @@ export async function DELETE(request, { params }) {
           .from('schedule_entries')
           .update({
             ...plan.patch,
-            updated_by: auth.actor.id,
+            updated_by: gate.actor.id,
           })
           .eq('id', body.entryId)
           .eq('booking_id', id);
@@ -297,7 +303,7 @@ export async function DELETE(request, { params }) {
           .from('schedule_entries')
           .update({
             ...plan.patch,
-            updated_by: auth.actor.id,
+            updated_by: gate.actor.id,
           })
           .eq('id', body.entryId)
           .eq('booking_id', id);
@@ -313,23 +319,23 @@ export async function DELETE(request, { params }) {
           ...rest,
           ...plan.insert,
           booking_id: id,
-          created_by: auth.actor.id,
-          updated_by: auth.actor.id,
+          created_by: gate.actor.id,
+          updated_by: gate.actor.id,
         });
         if (insertError) return jsonError(insertError.message, 500);
       }
 
       const { versionNumber } = await bumpVersionAndSnapshot(id, {
-        id: auth.actor.id,
-        name: auth.actor.name,
+        id: gate.actor.id,
+        name: gate.actor.name,
         source: 'admin_portal',
       });
 
       await logActivity({
         bookingId: id,
         versionNumber,
-        actorId: auth.actor.id,
-        actorName: auth.actor.name,
+        actorId: gate.actor.id,
+        actorName: gate.actor.name,
         actorRole: 'admin',
         action: 'schedule_entry_removed',
         section: 'schedule',
@@ -351,16 +357,16 @@ export async function DELETE(request, { params }) {
     if (error) return jsonError(error.message, 500);
 
     const { versionNumber } = await bumpVersionAndSnapshot(id, {
-      id: auth.actor.id,
-      name: auth.actor.name,
+      id: gate.actor.id,
+      name: gate.actor.name,
       source: 'admin_portal',
     });
 
     await logActivity({
       bookingId: id,
       versionNumber,
-      actorId: auth.actor.id,
-      actorName: auth.actor.name,
+      actorId: gate.actor.id,
+      actorName: gate.actor.name,
       actorRole: 'admin',
       action: 'schedule_entry_removed',
       section: 'schedule',

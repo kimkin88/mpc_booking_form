@@ -1,4 +1,5 @@
-import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { jsonOk, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import {
   prepareDirectUploads,
   completeDirectUploads,
@@ -12,33 +13,37 @@ import {
 import { createServiceClient } from '@/lib/supabase/admin';
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
+  try {
+    const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
 
-  const { id } = await params;
-  const { searchParams } = new URL(request.url);
-  const includeRemoved = searchParams.get('includeRemoved') === 'true';
+    const { searchParams } = new URL(request.url);
+    const includeRemoved = searchParams.get('includeRemoved') === 'true';
 
-  const supabase = createServiceClient();
-  let query = supabase
-    .from('file_assets')
-    .select('*')
-    .eq('booking_id', id)
-    .order('created_at', { ascending: false });
+    const supabase = createServiceClient();
+    let query = supabase
+      .from('file_assets')
+      .select('*')
+      .eq('booking_id', id)
+      .order('created_at', { ascending: false });
 
-  if (!includeRemoved) query = query.eq('is_removed', false);
+    if (!includeRemoved) query = query.eq('is_removed', false);
 
-  const { data, error } = await query;
-  if (error) return jsonError(error.message, 500);
-  return jsonOk(data);
+    const { data, error } = await query;
+    if (error) return jsonError(error.message, 500);
+    return jsonOk(data);
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const action = body.action || 'prepare';
 
@@ -56,7 +61,7 @@ export async function POST(request, { params }) {
       const results = await completeDirectUploads({
         bookingId: id,
         tickets: body.tickets || [],
-        actor: auth.actor,
+        actor: gate.actor,
         source: 'admin_portal',
       });
       return jsonOk(results);
@@ -76,7 +81,7 @@ export async function POST(request, { params }) {
       if (!body.ticket) return jsonError('ticket is required', 400);
       const asset = await completeDirectReplace({
         ticket: body.ticket,
-        actor: auth.actor,
+        actor: gate.actor,
         source: 'admin_portal',
       });
       return jsonOk(asset);
@@ -89,11 +94,11 @@ export async function POST(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
 
     if (body.action === 'category_status') {
@@ -101,13 +106,13 @@ export async function PATCH(request, { params }) {
         bookingId: id,
         category: body.category,
         status: body.status,
-        actor: auth.actor,
+        actor: gate.actor,
       });
       return jsonOk(data);
     }
 
     if (body.action === 'restore') {
-      const data = await restoreFile({ fileId: body.fileId, actor: auth.actor });
+      const data = await restoreFile({ fileId: body.fileId, actor: gate.actor });
       return jsonOk(data);
     }
 
@@ -115,7 +120,7 @@ export async function PATCH(request, { params }) {
       const data = await updateFileMeta({
         fileId: body.fileId,
         updates: body.updates || body,
-        actor: auth.actor,
+        actor: gate.actor,
       });
       return jsonOk(data);
     }
@@ -127,15 +132,15 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
-    await params;
+    const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const data = await softDeleteFile({
       fileId: body.fileId,
-      actor: auth.actor,
+      actor: gate.actor,
       source: 'admin_portal',
     });
     return jsonOk(data);

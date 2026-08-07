@@ -8,7 +8,7 @@ function publicUser(session) {
     email: session.user.email,
     username: session.user.email,
     name: session.user.name,
-    role: 'admin',
+    role: session.user.role || session.profile?.role || 'admin',
   };
 }
 

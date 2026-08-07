@@ -1,4 +1,5 @@
-import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { jsonOk, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import {
   generatePortalLink,
   getPortalByBooking,
@@ -9,24 +10,29 @@ import {
 } from '@/services/portalService';
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-  const { id } = await params;
-  const portal = await getPortalByBooking(id);
-  return jsonOk(toAdminPortalView(portal, request));
+  try {
+    const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
+    const portal = await getPortalByBooking(id);
+    return jsonOk(toAdminPortalView(portal, request));
+  } catch (err) {
+    return jsonError(err.message, 500);
+  }
 }
 
 export async function POST(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const action = body.action;
 
     if (action === 'generate' || action === 'regenerate') {
-      const result = await generatePortalLink(id, auth.actor, { request });
+      const result = await generatePortalLink(id, gate.actor, { request });
       return jsonOk({
         portal: toAdminPortalView(result.portal, request),
         url: result.url,
@@ -35,17 +41,17 @@ export async function POST(request, { params }) {
     }
 
     if (action === 'set_pin') {
-      const portal = await setPortalPin(id, body.pin || null, auth.actor);
+      const portal = await setPortalPin(id, body.pin || null, gate.actor);
       return jsonOk(toAdminPortalView(portal, request));
     }
 
     if (action === 'reset_pin') {
-      const portal = await setPortalPin(id, null, auth.actor);
+      const portal = await setPortalPin(id, null, gate.actor);
       return jsonOk(toAdminPortalView(portal, request));
     }
 
     if (action === 'unlock') {
-      const result = await unlockPortalForEditing(id, auth.actor);
+      const result = await unlockPortalForEditing(id, gate.actor);
       return jsonOk({
         ...toAdminPortalView(result.portal, request),
         _meta: {
@@ -81,12 +87,12 @@ export async function POST(request, { params }) {
       }
       if (action === 'unlock_editing') {
         // Soft path → full unlock semantics so it actually works on the client
-        const result = await unlockPortalForEditing(id, auth.actor);
+        const result = await unlockPortalForEditing(id, gate.actor);
         return jsonOk(toAdminPortalView(result.portal, request));
       }
       if (action === 'set_expiry') updates.expires_at = body.expires_at ?? null;
 
-      const portal = await updatePortalStatus(id, updates, auth.actor);
+      const portal = await updatePortalStatus(id, updates, gate.actor);
       return jsonOk(toAdminPortalView(portal, request));
     }
 
@@ -94,7 +100,7 @@ export async function POST(request, { params }) {
       const portal = await updatePortalStatus(
         id,
         { status_portal_editable: body.status_portal_editable || {} },
-        auth.actor
+        gate.actor
       );
       return jsonOk(toAdminPortalView(portal, request));
     }

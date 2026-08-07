@@ -7,6 +7,7 @@ import { diffObjects } from '@/utils/helpers';
 import { calculateDeliveryDate } from '@/lib/deliveryDate';
 import { calculateInChargeFromBooking } from '@/lib/inCharge';
 import { costForDayLength, ratesFromBooking } from '@/lib/rateCard';
+import { isMainAdmin } from '@/lib/adminAccess';
 
 function statusLabel(value) {
   return BOOKING_STATUSES.find((s) => s.value === value)?.label || value;
@@ -60,6 +61,7 @@ export async function listBookings({
   page = 1,
   pageSize = 20,
   sort = 'updated_desc',
+  createdBy = null,
 } = {}) {
   const supabase = createServiceClient();
   const safePage = Math.max(1, Number(page) || 1);
@@ -83,12 +85,13 @@ export async function listBookings({
   let query = supabase
     .from('bookings')
     .select(
-      'id, sb_number, status, campaign_name, client_company, city_market, currency, budget, current_version, updated_at, created_at',
+      'id, sb_number, status, campaign_name, client_company, city_market, currency, budget, current_version, updated_at, created_at, created_by',
       { count: 'exact' }
     )
     .order(sortConfig.column, { ascending: sortConfig.ascending, nullsFirst: false })
     .range(from, to);
 
+  if (createdBy) query = query.eq('created_by', createdBy);
   if (status) query = query.eq('status', status);
   if (search) {
     query = query.or(
@@ -208,6 +211,7 @@ export async function createBooking(payload, actor) {
     status: 'draft',
     current_version: 1,
     created_by: actor.id,
+    mpc_owner_name: actor.name || null,
   };
 
   const { data: booking, error } = await supabase
@@ -290,6 +294,30 @@ export async function updateBooking(bookingId, payload, actor, options = {}) {
       updates[field] = payload[field];
     }
   });
+
+  // Main admin may reassign ownership (created_by) to another staff profile.
+  if (Object.prototype.hasOwnProperty.call(payload, 'created_by') && isMainAdmin(actor)) {
+    const nextOwnerId = payload.created_by || null;
+    if (nextOwnerId) {
+      const { data: ownerProfile, error: ownerError } = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role')
+        .eq('id', nextOwnerId)
+        .maybeSingle();
+      if (ownerError) throw ownerError;
+      if (!ownerProfile || !['admin', 'main_admin'].includes(ownerProfile.role)) {
+        const err = new Error('Assigned admin was not found');
+        err.code = 'INVALID_OWNER';
+        err.status = 400;
+        throw err;
+      }
+      updates.created_by = ownerProfile.id;
+      if (!Object.prototype.hasOwnProperty.call(updates, 'mpc_owner_name')) {
+        updates.mpc_owner_name =
+          ownerProfile.full_name || ownerProfile.email || current.mpc_owner_name;
+      }
+    }
+  }
 
   if (Object.prototype.hasOwnProperty.call(updates, 'budget') && updates.budget !== null && updates.budget !== '') {
     updates.budget = Number(updates.budget);

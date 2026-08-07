@@ -18,10 +18,15 @@ MPC Booking is an internal booking control system with a secure client portal. A
 
 | Role | How they access | What they do |
 |------|-----------------|--------------|
-| **Administrator** | `/login` with email/password (Supabase Auth; profile role must be `admin`) | Create/manage bookings, portals, files, calendar, permissions, reminders |
+| **Main administrator** | `/login` (Supabase Auth; `profiles.role = main_admin`) | Sees all bookings; can reassign ownership; manages Team roles |
+| **Administrator** | `/login` (Supabase Auth; `profiles.role = admin`) | Sees/manages only bookings assigned to them (`created_by`) |
 | **Client (portal user)** | Unique portal URL `/portal/[token]` (+ optional PIN) | Complete permitted fields, upload files, submit for review |
 
-There is **no in-app user directory** for creating admin accounts. Admins are provisioned in Supabase Auth; a database trigger assigns `profiles.role = 'admin'`.
+Admins are provisioned in Supabase Auth. A database trigger assigns new profiles `role = 'admin'` (scoped). Main admins can also create staff from **Team** (`/admin/team`). Bootstrap the first main admin with SQL if needed:
+
+```sql
+UPDATE public.profiles SET role = 'main_admin' WHERE email = 'you@example.com';
+```
 
 ### Main capabilities
 
@@ -48,7 +53,7 @@ There is **no in-app user directory** for creating admin accounts. Admins are pr
 3. Click **Sign in**.
 4. On success you land on **Bookings** (`/admin`).
 
-**Preconditions:** Your account must exist in Supabase Auth and `profiles.role` must be `admin`. Non-admin accounts are signed out with an error such as “This account is not an admin.”
+**Preconditions:** Your account must exist in Supabase Auth and `profiles.role` must be `admin` or `main_admin`. Non-staff accounts are signed out with an error such as “This account is not an admin.”
 
 **Tip:** If you were redirected to login from a deep link, after sign-in you return to that page when `?redirect=` is present.
 
@@ -82,9 +87,10 @@ Primary navigation (header on desktop; under header on mobile):
 
 | Menu item | Path | Purpose |
 |-----------|------|---------|
-| **Bookings** | `/admin` | List and open bookings |
-| **Sent Links** | `/admin/links` | All portal URLs across bookings |
-| **New Booking** | `/admin/bookings/new` | Create a booking |
+| **Bookings** | `/admin` | List and open bookings (scoped by role) |
+| **Sent Links** | `/admin/links` | Portal URLs for accessible bookings |
+| **New Booking** | `/admin/bookings/new` | Create a booking (you become owner) |
+| **Team** | `/admin/team` | Main admin only — create admins; promote/demote |
 
 Header utilities (left to right after nav):
 
@@ -136,7 +142,7 @@ Header utilities (left to right after nav):
 
 ### Creating users
 
-Not available in the admin UI. Create users in **Supabase Auth** (Dashboard or invite). The schema trigger sets new profiles to role `admin`.
+Not available for self-signup. Main admins create staff on **Team** (`/admin/team`). The schema trigger still sets new Auth users to role `admin` by default.
 
 > Confirm with your deployment team that only intended staff receive accounts.
 
@@ -154,7 +160,12 @@ Use **Settings → Change password** for the signed-in admin. Forced reset for a
 
 ### Assigning roles
 
-Only the `admin` role is enforced for `/admin` and admin APIs. The Settings panel may show **Admin** vs **User** as a label; API access still requires `role === 'admin'`.
+Use **Team** (`/admin/team`) as a main admin to:
+
+- **Create admin** — email, temporary password, optional name, role (`admin` or `main_admin`)
+- **Change roles** between `admin` and `main_admin` (cannot demote the last main admin)
+
+Bootstrap the first main admin with SQL if none exists yet (see §1).
 
 ### Permissions (application level)
 
@@ -168,8 +179,11 @@ See [PERMISSIONS_MATRIX.md](./PERMISSIONS_MATRIX.md) and §5.
 
 | Role | Access |
 |------|--------|
-| `admin` | Full admin UI and APIs |
+| `main_admin` | All bookings; reassign ownership; Team page |
+| `admin` | Only bookings where `created_by` is their profile id |
 | Other / missing | Cannot use admin; signed out on login attempt |
+
+**Ownership:** Creating a booking sets `created_by` to you. A main admin can change **Assigned to** on the booking detail page (updates `created_by` and syncs MPC Booking Owner name for notifications).
 
 Portal clients are **not** Auth users; they authenticate via portal token (+ optional PIN).
 

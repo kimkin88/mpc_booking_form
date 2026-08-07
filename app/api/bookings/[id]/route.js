@@ -1,18 +1,18 @@
 import { requireAdmin, jsonOk, jsonError } from '@/lib/api';
+import { requireBookingAccess } from '@/lib/requireBookingAccess';
 import { validateBookingUpdate } from '@/lib/validation';
-import { getBooking, updateBooking, deleteBooking } from '@/services/bookingService';
+import { updateBooking, deleteBooking } from '@/services/bookingService';
 import { toAdminPortalView } from '@/services/portalService';
 
 export async function GET(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
-    const data = await getBooking(id);
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     return jsonOk({
-      ...data,
-      portal: toAdminPortalView(data.portal, request),
+      ...gate.data,
+      portal: toAdminPortalView(gate.data.portal, request),
     });
   } catch (err) {
     return jsonError(err.message, err.code === 'PGRST116' ? 404 : 500);
@@ -20,11 +20,11 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
     const body = await request.json();
     const validation = validateBookingUpdate(body);
     if (!validation.success) {
@@ -34,7 +34,7 @@ export async function PATCH(request, { params }) {
     }
 
     const { expected_version, allow_po_override, ...payload } = body;
-    const result = await updateBooking(id, payload, auth.actor, {
+    const result = await updateBooking(id, payload, gate.actor, {
       expectedVersion: expected_version,
       allowPoOverride: allow_po_override !== false,
       source: 'admin_portal',
@@ -49,17 +49,18 @@ export async function PATCH(request, { params }) {
       });
     }
     if (err.code === 'DUPLICATE_SB') return jsonError(err.message, 409, { code: err.code });
-    return jsonError(err.message, 500);
+    if (err.code === 'INVALID_OWNER') return jsonError(err.message, 400, { code: err.code });
+    return jsonError(err.message, err.status || 500);
   }
 }
 
 export async function DELETE(_request, { params }) {
-  const auth = await requireAdmin();
-  if (auth.error) return auth.error;
-
   try {
     const { id } = await params;
-    const result = await deleteBooking(id, auth.actor);
+    const gate = await requireBookingAccess(id);
+    if (gate.error) return gate.error;
+
+    const result = await deleteBooking(id, gate.actor);
     return jsonOk(result);
   } catch (err) {
     const status = err.code === 'NOT_FOUND' || err.code === 'PGRST116' ? 404 : 500;

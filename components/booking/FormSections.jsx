@@ -208,10 +208,14 @@ export function CampaignDetailsSection({
   scheduleEntries = [],
   poFiles = null,
   showAdminOwnership = false,
+  canReassignOwner = false,
+  adminOptions = [],
   id,
 }) {
   const keys = ['brand', 'campaign_name', 'sb_number', 'budget', 'currency', 'po_number'];
-  if (!anyShown(fieldHidden, keys) && !poFiles && !showAdminOwnership) return null;
+  if (!anyShown(fieldHidden, keys) && !poFiles && !showAdminOwnership && !canReassignOwner) {
+    return null;
+  }
 
   const rates = ratesFromBooking(values);
   const budgetSet = hasBudgetCap(values.budget);
@@ -335,19 +339,49 @@ export function CampaignDetailsSection({
 
       {showAdminOwnership && (
         <Grid $cols={2} style={{ marginTop: '1rem' }}>
-          <Input
-            label="MPC Booking Owner"
-            name="mpc_owner_name"
-            value={values.mpc_owner_name || ''}
-            onChange={(e) => onChange('mpc_owner_name', e.target.value)}
-            disabled={readOnly}
-          />
+          {canReassignOwner ? (
+            <Select
+              label="Assigned to"
+              name="created_by"
+              value={values.created_by || undefined}
+              onValueChange={(v) => onChange('created_by', v || null)}
+              placeholder="Select admin…"
+              options={adminOptions.map((a) => ({
+                value: a.id,
+                label: `${a.full_name || a.email || a.id}${
+                  a.role === 'main_admin' ? ' (main)' : ''
+                }`,
+              }))}
+              disabled={readOnly}
+              hint="Main admin can reassign who owns this booking"
+            />
+          ) : (
+            <Input
+              label="MPC Booking Owner"
+              name="mpc_owner_name"
+              value={values.mpc_owner_name || ''}
+              onChange={(e) => onChange('mpc_owner_name', e.target.value)}
+              disabled={readOnly}
+            />
+          )}
           <Input
             label="MPC Backup Owner"
             name="mpc_backup_owner_name"
             value={values.mpc_backup_owner_name || ''}
             onChange={(e) => onChange('mpc_backup_owner_name', e.target.value)}
             disabled={readOnly}
+          />
+        </Grid>
+      )}
+      {showAdminOwnership && canReassignOwner && (
+        <Grid $cols={2} style={{ marginTop: '1rem' }}>
+          <Input
+            label="MPC Booking Owner (display)"
+            name="mpc_owner_name"
+            value={values.mpc_owner_name || ''}
+            onChange={(e) => onChange('mpc_owner_name', e.target.value)}
+            disabled={readOnly}
+            hint="Synced from assigned admin on reassignment; editable for notifications"
           />
         </Grid>
       )}
