@@ -55,6 +55,7 @@ Fill in values from Supabase → **Settings → API**:
 
 Optional:
 
+- `SLACK_WEBHOOK_URL` — Incoming Webhook URL; when set, client→admin messages also ping that Slack channel
 - `MAX_FILE_SIZE_BYTES` (default `26214400` / 25MB)
 - `MALWARE_SCAN_ENABLED` (default off — see assumptions)
 - `CRON_SECRET` — shared secret for `/api/cron/portal-automation` (Vercel Cron uses `Authorization: Bearer <CRON_SECRET>`)

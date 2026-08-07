@@ -551,6 +551,7 @@ Environment variables operators typically configure (names only — store secret
 | `PORTAL_SESSION_TIMEOUT_MINUTES` | Portal session idle | 60 | Too short frustrates clients |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Document AI | model default `gpt-4o-mini` | Cost / privacy |
 | `MALWARE_SCAN_ENABLED` | Stub scanner flag | off unless true | Not a full AV product |
+| `SLACK_WEBHOOK_URL` | Incoming Webhook for client message pings | Optional; unset = Slack off | Share only with trusted ops |
 | Email (Gmail/Nodemailer) | Reminder & lock emails | Must use env in production | Hard-coded credentials are a deployment risk |
 
 Per-booking configuration lives under **Portal & Permissions** (auto-lock, status editability, field permissions, PIN, expiry).

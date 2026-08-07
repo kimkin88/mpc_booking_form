@@ -3,6 +3,7 @@ import { notifyClient, notifyBookingOwner } from '@/services/notificationService
 import { logActivity } from '@/services/activityService';
 import { getBooking } from '@/services/bookingService';
 import { clientDisplayName } from '@/utils/helpers';
+import { notifySlackClientMessage } from '@/lib/slack';
 
 const MAX_BODY = 4000;
 
@@ -219,7 +220,8 @@ export async function sendBookingMessage({
   if (error) throw new Error(error.message);
 
   const message = mapMessage(data);
-  const booking = await getBooking(bookingId);
+  const detail = await getBooking(bookingId);
+  const booking = detail?.booking || detail;
   const label = clientDisplayName(booking || {}) || booking?.sb_number || 'Booking';
 
   try {
@@ -247,6 +249,11 @@ export async function sendBookingMessage({
         `${label}: ${normalized.body.slice(0, 140)}`,
         { messageId: message.id }
       );
+      await notifySlackClientMessage({
+        booking,
+        senderName: senderName || label,
+        body: normalized.body,
+      });
     } else if (booking?.client_email) {
       await notifyClient(
         bookingId,
